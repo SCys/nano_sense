@@ -1,0 +1,17 @@
+# normal
+tornado
+orjson
+loguru
+
+# vision
+pillow
+ultralytics
+
+# audio
+faster-whisper
+ctranslate2==3.24.0
+# openai-whisper
+
+# 
+openai
+

@@ -1,0 +1,11 @@
+# 测试所需依赖
+pytest
+pytest-tornado
+mock
+
+# 测试运行依赖（可以使用模拟替代）
+tornado
+loguru
+
+# JSON 处理依赖
+orjson 

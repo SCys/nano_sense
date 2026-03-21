@@ -1,0 +1,16 @@
+[project]
+name = "ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "tornado",
+    "loguru",
+    "transformers",
+    "Pillow",
+    "ultralytics",
+    "faster-whisper",
+    "openai",
+    "orjson"
+]
