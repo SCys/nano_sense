@@ -1,14 +1,13 @@
-import datetime
 from datetime import datetime
-
-import orjson as json
-import tornado
+from fastapi import APIRouter, Request
 from loguru import logger
+from globals import get_openai_client
 
-from globals import openai_client
+router = APIRouter()
 
 
-class APIEmbeddings(tornado.web.RequestHandler):
+@router.post("/embeddings")
+async def create_embeddings(request: Request):
     """
     curl "https://generativelanguage.googleapis.com/v1beta/openai/embeddings" \
     -H "Content-Type: application/json" \
@@ -18,26 +17,28 @@ class APIEmbeddings(tornado.web.RequestHandler):
         "model": "text-embedding-004"
     }'
     """
+    data = await request.json()
+    input_text = data.get("input")
+    model = data.get("model", "text-embedding-004")
 
-    def post(self):
-        data = json.loads(self.request.body)
-        input = data.get("input")
-        model = data.get("model", "text-embedding-004")
+    if not input_text:
+        return {"error": "input is required"}
 
-        if not input:
-            self.write({"error": "input is required"})
-            return
+    ts_current = datetime.now()
+    try:
+        client = get_openai_client()  # 懒加载
+        response = client.embeddings.create(
+            input=input_text,
+            model=model,
+        )
 
-        ts_current = datetime.now()
-        try:
-            response = openai_client.embeddings.create(
-                input=input,
-                model=model,
-            )
+        logger.info(f"embedding time: {datetime.now() - ts_current}")
 
-            logger.info(f"embedding time: {datetime.now() - ts_current}")
-
-            self.write({"object": "embedding", "embedding": response.data[0].embedding, "index": 0})
-        except Exception as e:
-            logger.exception("embedding failed")
-            self.write({"error": str(e)})
+        return {
+            "object": "embedding",
+            "embedding": response.data[0].embedding,
+            "index": 0,
+        }
+    except Exception as e:
+        logger.exception("embedding failed")
+        return {"error": str(e)}

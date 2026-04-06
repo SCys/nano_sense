@@ -1,30 +1,28 @@
-import asyncio
-
-import tornado
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from loguru import logger
 
-from api_audio_transcriptions import APIAudioTranscriptions
-from api_embeddings import APIEmbeddings
-from api_vision_detection import APIVisionDetection
+from api_audio_transcriptions import router as audio_router
+from api_embeddings import router as embeddings_router
+from api_vision_detection import router as vision_router
 
 
-def make_app():
-    return tornado.web.Application(
-        [
-            (r"/v1/vision/detection", APIVisionDetection),
-            (r"/v1/audio/transcriptions", APIAudioTranscriptions),
-            (r"/v1/embeddings", APIEmbeddings),
-        ]
-    )
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Server starting...")
+    yield
+    logger.info("Server shutting down...")
 
 
-async def main():
-    app = make_app()
-    app.listen(8000)
+app = FastAPI(title="AI Services API", lifespan=lifespan)
 
-    logger.info("Server started at port 8000")
-    await asyncio.Event().wait()
+# 注册路由
+app.include_router(audio_router, prefix="/v1/audio")
+app.include_router(embeddings_router, prefix="/v1")
+app.include_router(vision_router, prefix="/v1/vision")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

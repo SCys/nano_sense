@@ -1,0 +1,15 @@
+[general]
+log_level = "INFO"
+
+[asr]
+timeout_seconds = 300
+model_path = "./data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/"
+
+[ultralytics]
+model_path = "./data/yolo11n.pt"
+timeout_seconds = 300
+
+[openai]
+api_key = "AIzaSyBbYJxTtwXh7pcK-OmSvZ3qxiM7gIkcMy0"
+base_url = "http://10.1.3.26:8888/v1/openai"
+timeout_seconds = 300

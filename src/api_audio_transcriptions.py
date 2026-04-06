@@ -1,75 +1,141 @@
-import datetime
-import io
-from datetime import datetime
+import os
+import tempfile
+import time
+from pathlib import Path
 
-import tornado
+import librosa
+import numpy as np
+from fastapi import APIRouter, UploadFile, File, Request
 from loguru import logger
 
-from globals import whisper_worker
+from globals import get_asr_recognizer
+
+router = APIRouter()
 
 
-class APIAudioTranscriptions(tornado.web.RequestHandler):
-    def post(self):
-        audio = self.request.files.get("audio")
-        if not audio:
-            self.write({"text": ""})
-            return
+def extract_text_from_funasr_result(asr_result) -> str:
+    """从 FunASR 返回结果中提取文本。"""
+    if isinstance(asr_result, str):
+        return asr_result.strip()
 
-        reponse_format = self.get_argument("response_format", "json")
-        timestamp_granularities = self.get_argument("timestamp_granularities", None)  # word, segment
+    if isinstance(asr_result, dict):
+        text = asr_result.get("text", "")
+        return str(text).strip()
 
-        ts_current = datetime.now()
-        try:
-            obj = io.BytesIO(audio[0]["body"])
+    if isinstance(asr_result, list):
+        chunks: list[str] = []
+        for item in asr_result:
+            if isinstance(item, dict):
+                chunk_text = item.get("text", "")
+                if chunk_text:
+                    chunks.append(str(chunk_text).strip())
+            elif isinstance(item, str) and item.strip():
+                chunks.append(item.strip())
+        return " ".join([chunk for chunk in chunks if chunk]).strip()
 
-            segments, info = whisper_worker.transcribe(obj, beam_size=5)
+    return str(asr_result).strip()
 
-            # 打印音频信息
-            logger.info(
-                f"Audio duration {info.duration:.2f}s. "
-                f"Detected language '{info.language}' with probability {info.language_probability}"
-            )
 
-            # 打印完整转录文本
-            full_text = ""
-            segments_data = []
-            for segment in segments:
-                start = segment.start  # 开始时间
-                end = segment.end  # 结束时间
-                text = segment.text  # 文本内容
-                full_text += text + " "
-                
-                # 构建segment数据
-                segment_data = {
-                    "id": segment.id,
-                    "start": segment.start,
-                    "end": segment.end,
-                    "text": segment.text
-                }
-                segments_data.append(segment_data)
-                
-                logger.debug(f"[{start:.2f}s - {end:.2f}s] {text}")
+def load_audio(filename: str) -> np.ndarray:
+    audio, sr = librosa.load(filename, sr=16000, mono=True)
+    assert sr == 16000
+    return np.ascontiguousarray(audio, dtype=np.float32)
 
-            if reponse_format == "text":
-                self.write(full_text.strip())
-                return
 
-            if not timestamp_granularities:
-                self.write({"text": full_text.strip()})
-                return
+def human_readable_size(num_bytes: int) -> str:
+    if num_bytes == 0:
+        return "0 B"
+    size_name = ("B", "KB", "MB", "GB", "TB")
+    i = int(np.log(num_bytes) / np.log(1024))
+    p = 1024**i
+    s = round(num_bytes / p, 2)
+    return f"{s} {size_name[i]}"
 
-            self.write(
-                {
-                    "task": "transcribe",
-                    "language": info.language,
-                    "duration": info.duration,
-                    "text": full_text.strip(),
-                    "segments": segments_data,
-                }
-            )
 
-        except Exception as e:
-            self.write({"text": f"ASR Failed:{str(e)}"})
-            logger.exception("asr failed")
-        finally:
-            logger.info(f"time: {datetime.now() - ts_current}")
+@router.post("/transcriptions")
+async def transcribe(
+    request: Request,
+    file: UploadFile | None = File(None),
+    response_format: str = "json",
+):
+    # 兼容无文件请求
+    if file is None:
+        return {"text": ""}
+
+    start_total = time.perf_counter()
+    content = await file.read()
+    file_size = len(content)
+    file_type = file.content_type or f"audio/{Path(file.filename or '').suffix.lower().lstrip('.') or 'unknown'}"
+    size_human = human_readable_size(file_size)
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        receive_ms = (time.perf_counter() - start_total) * 1000
+
+        load_start = time.perf_counter()
+        samples = load_audio(tmp_path)
+        load_ms = (time.perf_counter() - load_start) * 1000
+
+        decode_start = time.perf_counter()
+        recognizer = get_asr_recognizer()  # 懒加载并更新访问时间
+        asr_result = recognizer.generate(input=tmp_path)
+        decode_ms = (time.perf_counter() - decode_start) * 1000
+
+        text = extract_text_from_funasr_result(asr_result)
+        duration = len(samples) / 16000
+        total_ms = (time.perf_counter() - start_total) * 1000
+        rtf = decode_ms / 1000 / duration if duration > 0 else 0.0
+
+        # 日志
+        logger.info(
+            f"✅ [FireRedASR2-CTC] Transcribed {duration:.2f}s "
+            f"| size={size_human} "
+            f"| receive={receive_ms:.1f}ms "
+            f"| load={load_ms:.1f}ms "
+            f"| decode={decode_ms:.1f}ms "
+            f"| total={total_ms:.1f}ms "
+            f"| RTF={rtf:.3f} "
+            f"| type={file_type}"
+        )
+
+        # 响应格式处理
+        timestamp_granularities = request.query_params.get("timestamp_granularities")
+        need_segments = (response_format == "verbose_json") or (timestamp_granularities is not None)
+
+        if response_format == "text":
+            return text
+
+        result: dict = {"text": text}
+        if need_segments:
+            # 兼容旧版分段结构
+            result["segments"] = [{"id": 0, "start": 0.0, "end": round(duration, 4), "text": text}]
+            # 添加额外的性能信息（仅verbose_json时）
+            if response_format == "verbose_json":
+                result.update(
+                    {
+                        "duration_seconds": round(duration, 4),
+                        "file_size_bytes": file_size,
+                        "file_size_human": size_human,
+                        "file_type": file_type,
+                        "timings": {
+                            "receive_ms": round(receive_ms, 2),
+                            "load_audio_ms": round(load_ms, 2),
+                            "decode_ms": round(decode_ms, 2),
+                            "total_ms": round(total_ms, 2),
+                            "rtf": round(rtf, 3),
+                        },
+                    }
+                )
+        return result
+
+    except Exception as e:
+        logger.exception("asr failed")
+        return {"text": f"ASR Failed:{str(e)}"}
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)

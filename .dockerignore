@@ -1,0 +1,24 @@
+.git
+.gitignore
+.cursor
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# 大体积数据与模型目录
+data/
+models/
+
+# Python 构建缓存
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.cache
+
+# IDE/系统文件
+.DS_Store
+*.swp
