@@ -84,10 +84,13 @@ class TestAPIAudioTranscriptionsMock(unittest.TestCase):
             "/v1/audio/transcriptions",
             files={"file": ("test.ogg", b"fake audio", "audio/ogg")},
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 500)
         data = response.json()
-        self.assertIn("text", data)
-        self.assertIn("ASR Failed", data["text"])
+        # FastAPI wraps HTTPException details in "detail" key
+        self.assertIn("detail", data)
+        detail = data["detail"]
+        self.assertEqual(detail["error"], "transcription_failed")
+        self.assertIn("request_id", detail)
         # Reset side effect for other tests
         mock_recognizer.generate.side_effect = None
 

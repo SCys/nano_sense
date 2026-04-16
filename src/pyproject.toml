@@ -16,6 +16,9 @@ dependencies = [
     "setuptools>=81.0.0",
     "ultralytics>=8.4.33",
     "uvicorn>=0.43.0",
+    # TTS dependencies (Qwen3-TTS-ONNX)
+    "onnxruntime-gpu>=1.18.0",
+    "soundfile>=0.12.0",
 ]
 
 [project.optional-dependencies]

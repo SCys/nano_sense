@@ -5,6 +5,10 @@ log_level = "INFO"
 timeout_seconds = 300
 model_path = "./data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/"
 
+[tts]
+timeout_seconds = 300
+model_path = "./data/openbmb/VoxCPM2"
+
 [ultralytics]
 model_path = "./data/yolo11n.pt"
 timeout_seconds = 300

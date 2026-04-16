@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from loguru import logger
 
 from api_audio_transcriptions import router as audio_router
+from api_audio_synthesis import router as synthesis_router
 from api_embeddings import router as embeddings_router
 from api_vision_detection import router as vision_router
 
@@ -18,6 +19,7 @@ app = FastAPI(title="AI Services API", lifespan=lifespan)
 
 # 注册路由
 app.include_router(audio_router, prefix="/v1/audio")
+app.include_router(synthesis_router, prefix="/v1/audio")
 app.include_router(embeddings_router, prefix="/v1")
 app.include_router(vision_router, prefix="/v1/vision")
 

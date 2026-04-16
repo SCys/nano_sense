@@ -1,16 +1,35 @@
 import os
 import tempfile
 import time
+import uuid
 from pathlib import Path
+from typing import Optional
 
 import librosa
 import numpy as np
-from fastapi import APIRouter, UploadFile, File, Request
+from fastapi import APIRouter, UploadFile, File, Request, HTTPException, Depends
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from globals import get_asr_recognizer
 
 router = APIRouter()
+
+
+class TranscriptionRequest(BaseModel):
+    """音频转录请求模型"""
+    # FastAPI 直接从 query parameters 解析这两个字段
+    # 我们在这里定义是为了文档和类型提示，实际使用时会从 request.query_params 获取
+    response_format: str = Field("json", description="响应格式: json, text, verbose_json")
+    timestamp_granularities: Optional[str] = Field(None, description="时间戳粒度")
+
+
+def get_request_id(request: Request) -> str:
+    """从请求头获取或生成请求ID"""
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id:
+        request_id = str(uuid.uuid4())
+    return request_id
 
 
 def extract_text_from_funasr_result(asr_result) -> str:
@@ -56,11 +75,24 @@ def human_readable_size(num_bytes: int) -> str:
 async def transcribe(
     request: Request,
     file: UploadFile | None = File(None),
-    response_format: str = "json",
+    query_params: TranscriptionRequest = Depends(),
 ):
+    """
+    音频转录接口
+
+    - **response_format**: 响应格式 (json, text, verbose_json)
+    - **timestamp_granularities**: 时间戳粒度（如 segment）
+    """
+    request_id = get_request_id(request)
+    log = logger.bind(request_id=request_id)
+
     # 兼容无文件请求
     if file is None:
         return {"text": ""}
+
+    # 从依赖注入中获取参数
+    response_format = query_params.response_format
+    timestamp_granularities = query_params.timestamp_granularities
 
     start_total = time.perf_counter()
     content = await file.read()
@@ -90,8 +122,8 @@ async def transcribe(
         total_ms = (time.perf_counter() - start_total) * 1000
         rtf = decode_ms / 1000 / duration if duration > 0 else 0.0
 
-        # 日志
-        logger.info(
+        # 日志（附加请求ID）
+        log.info(
             f"✅ [FireRedASR2-CTC] Transcribed {duration:.2f}s "
             f"| size={size_human} "
             f"| receive={receive_ms:.1f}ms "
@@ -99,11 +131,11 @@ async def transcribe(
             f"| decode={decode_ms:.1f}ms "
             f"| total={total_ms:.1f}ms "
             f"| RTF={rtf:.3f} "
-            f"| type={file_type}"
+            f"| type={file_type} "
+            f"| request_id={request_id}"
         )
 
         # 响应格式处理
-        timestamp_granularities = request.query_params.get("timestamp_granularities")
         need_segments = (response_format == "verbose_json") or (timestamp_granularities is not None)
 
         if response_format == "text":
@@ -132,10 +164,25 @@ async def transcribe(
                 )
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.exception("asr failed")
-        return {"text": f"ASR Failed:{str(e)}"}
+        log.exception("asr failed")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "transcription_failed",
+                "message": str(e),
+                "request_id": request_id,
+            }
+        )
 
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except Exception as e:
+                log.warning(f"Failed to delete temp file {tmp_path}: {e}")
+                # 注册到 atexit 确保最终会被清理
+                import atexit
+                atexit.register(os.unlink, tmp_path)
