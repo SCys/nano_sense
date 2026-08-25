@@ -3,24 +3,25 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import librosa
 import numpy as np
-from fastapi import APIRouter, UploadFile, File, Request, HTTPException, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
 from loguru import logger
+from pydantic import BaseModel, Field
 
-from globals import get_asr_recognizer
+from globals import use_asr_recognizer
 
 router = APIRouter()
+
+MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100MB
 
 
 class TranscriptionRequest(BaseModel):
     """音频转录请求模型"""
-    # FastAPI 直接从 query parameters 解析这两个字段
-    # 我们在这里定义是为了文档和类型提示，实际使用时会从 request.query_params 获取
     response_format: str = Field("json", description="响应格式: json, text, verbose_json")
     timestamp_granularities: Optional[str] = Field(None, description="时间戳粒度")
 
@@ -51,7 +52,7 @@ def extract_text_from_funasr_result(asr_result) -> str:
                     chunks.append(str(chunk_text).strip())
             elif isinstance(item, str) and item.strip():
                 chunks.append(item.strip())
-        return " ".join([chunk for chunk in chunks if chunk]).strip()
+        return "".join([chunk for chunk in chunks if chunk]).strip()
 
     return str(asr_result).strip()
 
@@ -73,6 +74,21 @@ def human_readable_size(num_bytes: int) -> str:
     return f"{s} {size_name[i]}"
 
 
+def _sync_asr_pipeline(recognizer, tmp_path: str) -> Tuple[str, float, float, float]:
+    """在工作线程池中执行音频读取与声学模型解码"""
+    load_start = time.perf_counter()
+    samples = load_audio(tmp_path)
+    load_ms = (time.perf_counter() - load_start) * 1000
+
+    decode_start = time.perf_counter()
+    asr_result = recognizer.generate(input=tmp_path)
+    decode_ms = (time.perf_counter() - decode_start) * 1000
+
+    text = extract_text_from_funasr_result(asr_result)
+    duration = len(samples) / 16000
+    return text, duration, load_ms, decode_ms
+
+
 @router.post("/transcriptions")
 async def transcribe(
     request: Request,
@@ -92,13 +108,19 @@ async def transcribe(
     if file is None:
         return {"text": ""}
 
-    # 从依赖注入中获取参数
     response_format = query_params.response_format
     timestamp_granularities = query_params.timestamp_granularities
 
     start_total = time.perf_counter()
     content = await file.read()
     file_size = len(content)
+
+    if file_size > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Audio file exceeds maximum allowed size of {MAX_AUDIO_BYTES // 1048576}MB",
+        )
+
     file_type = file.content_type or f"audio/{Path(file.filename or '').suffix.lower().lstrip('.') or 'unknown'}"
     size_human = human_readable_size(file_size)
 
@@ -110,21 +132,17 @@ async def transcribe(
 
         receive_ms = (time.perf_counter() - start_total) * 1000
 
-        load_start = time.perf_counter()
-        samples = load_audio(tmp_path)
-        load_ms = (time.perf_counter() - load_start) * 1000
+        # 通过 use_asr_recognizer 保护，并卸载至工作线程池防止阻塞主事件循环
+        with use_asr_recognizer() as recognizer:
+            text, duration, load_ms, decode_ms = await run_in_threadpool(
+                _sync_asr_pipeline,
+                recognizer=recognizer,
+                tmp_path=tmp_path,
+            )
 
-        decode_start = time.perf_counter()
-        recognizer = get_asr_recognizer()  # 懒加载并更新访问时间
-        asr_result = recognizer.generate(input=tmp_path)
-        decode_ms = (time.perf_counter() - decode_start) * 1000
-
-        text = extract_text_from_funasr_result(asr_result)
-        duration = len(samples) / 16000
         total_ms = (time.perf_counter() - start_total) * 1000
         rtf = decode_ms / 1000 / duration if duration > 0 else 0.0
 
-        # 日志（附加请求ID）
         log.info(
             f"✅ [FunASR] Transcribed {duration:.2f}s "
             f"| size={size_human} "
@@ -137,7 +155,6 @@ async def transcribe(
             f"| request_id={request_id}"
         )
 
-        # 响应格式处理
         need_segments = (response_format == "verbose_json") or (timestamp_granularities is not None)
 
         if response_format == "text":
@@ -145,9 +162,7 @@ async def transcribe(
 
         result: dict = {"text": text}
         if need_segments:
-            # 兼容旧版分段结构
             result["segments"] = [{"id": 0, "start": 0.0, "end": round(duration, 4), "text": text}]
-            # 添加额外的性能信息（仅verbose_json时）
             if response_format == "verbose_json":
                 result.update(
                     {
@@ -174,17 +189,13 @@ async def transcribe(
             status_code=500,
             detail={
                 "error": "transcription_failed",
-                "message": str(e),
+                "message": "ASR transcription failed, please check server logs",
                 "request_id": request_id,
-            }
+            },
         )
-
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
             except Exception as e:
                 log.warning(f"Failed to delete temp file {tmp_path}: {e}")
-                # 注册到 atexit 确保最终会被清理
-                import atexit
-                atexit.register(os.unlink, tmp_path)

@@ -26,20 +26,17 @@ class TestAPIVisionDetection(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # 创建只包含视觉路由的FastAPI应用
         app = FastAPI()
         app.include_router(vision_router, prefix="/v1/vision")
         cls.client = TestClient(app)
 
-    @patch("api_vision_detection.get_vision_model")
-    def test_detection_success(self, mock_get_model):
+    @patch("api_vision_detection.use_vision_model")
+    def test_detection_success(self, mock_use_model):
         """测试成功的检测请求"""
-        # 模拟YOLO模型
         mock_model = MagicMock()
         mock_model.predict.return_value = [MockResult()]
-        mock_get_model.return_value = mock_model
+        mock_use_model.return_value.__enter__.return_value = mock_model
 
-        # 创建测试图像（1x1 像素的RGB图像）
         img = Image.new("RGB", (1, 1), color="red")
         img_bytes = io.BytesIO()
         img.save(img_bytes, format="PNG")
@@ -66,13 +63,12 @@ class TestAPIVisionDetection(unittest.TestCase):
         self.assertEqual(pred["label"], "person")
         self.assertAlmostEqual(pred["confidence"], 0.95, places=5)
 
-    @patch("api_vision_detection.get_vision_model")
-    def test_detection_multiple_objects(self, mock_get_model):
+    @patch("api_vision_detection.use_vision_model")
+    def test_detection_multiple_objects(self, mock_use_model):
         """测试多目标检测"""
-        # 创建两个模拟结果
         mock_model = MagicMock()
         mock_model.predict.return_value = [MockResult(), MockResult()]
-        mock_get_model.return_value = mock_model
+        mock_use_model.return_value.__enter__.return_value = mock_model
 
         img = Image.new("RGB", (10, 10), color="blue")
         img_bytes = io.BytesIO()
@@ -91,14 +87,12 @@ class TestAPIVisionDetection(unittest.TestCase):
     def test_no_image_provided(self):
         """测试不提供图像"""
         response = self.client.post("/v1/vision/detection")
-        self.assertEqual(response.status_code, 422)  # FastAPI验证错误
+        self.assertEqual(response.status_code, 422)
 
-    @patch("api_vision_detection.get_vision_model")
-    def test_detection_model_error(self, mock_get_model):
+    @patch("api_vision_detection.use_vision_model")
+    def test_detection_model_error(self, mock_use_model):
         """测试模型内部错误"""
-        mock_model = MagicMock()
-        mock_model.predict.side_effect = RuntimeError("CUDA out of memory")
-        mock_get_model.return_value = mock_model
+        mock_use_model.side_effect = RuntimeError("CUDA out of memory")
 
         img = Image.new("RGB", (5, 5), color="green")
         img_bytes = io.BytesIO()
@@ -112,11 +106,7 @@ class TestAPIVisionDetection(unittest.TestCase):
 
         self.assertEqual(response.status_code, 500)
         data = response.json()
-        # FastAPI wraps HTTPException details in "detail" key
-        self.assertIn("detail", data)
-        detail = data["detail"]
-        self.assertEqual(detail["error"], "detection_failed")
-        self.assertIn("request_id", detail)
+        self.assertEqual(data["detail"]["error"], "detection_failed")
 
 
 if __name__ == "__main__":

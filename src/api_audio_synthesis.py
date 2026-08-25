@@ -12,13 +12,17 @@ import librosa
 import numpy as np
 import soundfile as sf
 from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from globals import get_tts_model
+from globals import use_tts_model
 
 router = APIRouter()
+
+MAX_TEXT_LENGTH = 4000
+MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25MB
 
 # OpenAI 兼容音色名 → 适用于 VoxCPM2 的自然语言音色描述
 OPENAI_VOICE_PRESETS = {
@@ -48,7 +52,7 @@ class SpeechRequest(BaseModel):
     """OpenAI 兼容的语音生成请求体，支持声音设计与克隆扩展"""
 
     model: str = Field(default="voxcpm2", description="模型名，兼容性字段")
-    input: str = Field(..., description="要合成的文本")
+    input: str = Field(..., max_length=MAX_TEXT_LENGTH, description="要合成的文本（最多4000字符）")
     voice: str = Field(
         default="alloy",
         description=(
@@ -60,14 +64,16 @@ class SpeechRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.25, le=4.0, description="语速")
     instructions: Optional[str] = Field(
         default=None,
+        max_length=500,
         description="额外的语气/风格/情绪控制指令（如：稍微快一点，兴奋开心的语气）",
     )
     reference_audio: Optional[str] = Field(
         default=None,
-        description="用于声音克隆的参考音频（支持 base64 编码数据或 data URL）",
+        description="用于声音克隆的参考音频（支持 base64 编码数据或 data URL，最大 25MB）",
     )
     prompt_text: Optional[str] = Field(
         default=None,
+        max_length=1000,
         description="参考音频对应的原文本内容（提供后开启高保真极致克隆模式）",
     )
     cfg_value: float = Field(default=2.0, ge=1.0, le=5.0, description="生成引导强度")
@@ -90,7 +96,6 @@ def resolve_voice_instruct(voice: Optional[str], instructions: Optional[str]) ->
         if preset:
             parts.append(preset)
         else:
-            # 允许直接传自然语言音色描述，如 "温柔甜美的年轻女性声音"
             parts.append(voice.strip())
     if instructions:
         parts.append(instructions.strip())
@@ -98,10 +103,7 @@ def resolve_voice_instruct(voice: Optional[str], instructions: Optional[str]) ->
 
 
 def build_voxcpm_text(text: str, voice_instruct: Optional[str]) -> str:
-    """构造 VoxCPM2 接收的带音色提示词文本。
-
-    VoxCPM2 规则：将音色描述用圆括号置于文本开头，如 (温柔女声)你好。
-    """
+    """构造 VoxCPM2 接收的带音色提示词文本。"""
     clean_text = text.strip()
     if voice_instruct and voice_instruct.strip():
         return f"({voice_instruct.strip()}){clean_text}"
@@ -109,11 +111,7 @@ def build_voxcpm_text(text: str, voice_instruct: Optional[str]) -> str:
 
 
 def encode_audio(wav: np.ndarray, sample_rate: int, response_format: str) -> Tuple[bytes, str]:
-    """把 float32 波形编码为目标格式。
-
-    支持: wav / mp3 / flac / ogg（libsndfile 原生）、opus / aac（ffmpeg 兜底）、
-    pcm（16-bit 小端单声道原始样本，同 OpenAI 定义）。
-    """
+    """把 float32 波形编码为目标格式。"""
     fmt = response_format.lower().strip(".")
     if fmt == "oga":
         fmt = "ogg"
@@ -135,8 +133,8 @@ def encode_audio(wav: np.ndarray, sample_rate: int, response_format: str) -> Tup
     raise ValueError(f"Unsupported response_format '{response_format}'")
 
 
-def _encode_with_ffmpeg(wav: np.ndarray, sample_rate: int, fmt: str) -> Tuple[bytes, str]:
-    """用系统 ffmpeg 编码 opus / aac"""
+def _encode_with_ffmpeg(wav: np.ndarray, sample_rate: int, fmt: str, timeout_sec: int = 20) -> Tuple[bytes, str]:
+    """用系统 ffmpeg 编码 opus / aac，带超时防挂起保护"""
     if shutil.which("ffmpeg") is None:
         raise RuntimeError(f"fmt '{fmt}' requires ffmpeg on PATH")
 
@@ -151,7 +149,11 @@ def _encode_with_ffmpeg(wav: np.ndarray, sample_rate: int, fmt: str) -> Tuple[by
         cmd += ["-c:a", "aac", "-b:a", "128k", "-f", "adts", "pipe:1"]
         media_type = "audio/aac"
 
-    result = subprocess.run(cmd, input=wav.tobytes(), capture_output=True)
+    try:
+        result = subprocess.run(cmd, input=wav.tobytes(), capture_output=True, timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"ffmpeg encoding timed out after {timeout_sec}s")
+
     if result.returncode != 0 or not result.stdout:
         raise RuntimeError(f"ffmpeg encoding failed: {result.stderr.decode(errors='ignore')[:500]}")
     return result.stdout, media_type
@@ -176,7 +178,7 @@ def run_voxcpm_generation(
     cfg_value: float = 2.0,
     inference_timesteps: int = 10,
 ) -> Tuple[np.ndarray, int]:
-    """调用 VoxCPM2 执行语音生成（支持声音设计、克隆与复合控制）"""
+    """调用 VoxCPM2 执行语音生成（同步耗时操作，应在线程池中执行）"""
     sample_rate = getattr(model.tts_model, "sample_rate", 48000)
     styled_text = build_voxcpm_text(text, voice_instruct)
 
@@ -188,7 +190,6 @@ def run_voxcpm_generation(
                 temp_ref_path = tmp.name
 
         if temp_ref_path and prompt_text:
-            # 极致克隆模式 (Ultimate Cloning)
             wav = model.generate(
                 text=styled_text,
                 prompt_wav_path=temp_ref_path,
@@ -198,7 +199,6 @@ def run_voxcpm_generation(
                 inference_timesteps=inference_timesteps,
             )
         elif temp_ref_path:
-            # 标准声音克隆 / 复合控制克隆 (Voice Cloning / Controllable Cloning)
             wav = model.generate(
                 text=styled_text,
                 reference_wav_path=temp_ref_path,
@@ -206,14 +206,12 @@ def run_voxcpm_generation(
                 inference_timesteps=inference_timesteps,
             )
         else:
-            # 零样本 / 声音设计模式 (Zero-shot / Voice Design)
             wav = model.generate(
                 text=styled_text,
                 cfg_value=cfg_value,
                 inference_timesteps=inference_timesteps,
             )
 
-        # 语速调节（相位声码器时间拉伸，不变调）
         if speed != 1.0:
             wav = librosa.effects.time_stretch(y=wav.astype(np.float32), rate=speed)
 
@@ -227,24 +225,18 @@ def run_voxcpm_generation(
                 pass
 
 
-def _synthesize_response(
-    request: Request,
-    log,
+def _sync_synthesize_task(
+    model,
     text: str,
     voice_instruct: Optional[str],
     ref_audio_bytes: Optional[bytes],
     prompt_text: Optional[str],
     speed: float,
     response_format: str,
-    cfg_value: float = 2.0,
-    inference_timesteps: int = 10,
-) -> Response:
-    """公共合成处理流程"""
-    request_id = get_request_id(request)
-    start_total = time.perf_counter()
-
-    model = get_tts_model()  # 懒加载 / 超时自动下线保护
-
+    cfg_value: float,
+    inference_timesteps: int,
+) -> Tuple[bytes, str, float, int, float]:
+    """在工作线程池中执行生成与编码"""
     gen_start = time.perf_counter()
     wav, sample_rate = run_voxcpm_generation(
         model=model,
@@ -257,11 +249,43 @@ def _synthesize_response(
         inference_timesteps=inference_timesteps,
     )
     gen_ms = (time.perf_counter() - gen_start) * 1000
-
     audio_bytes, media_type = encode_audio(wav, sample_rate, response_format)
     duration = len(wav) / sample_rate
-    total_ms = (time.perf_counter() - start_total) * 1000
+    return audio_bytes, media_type, duration, sample_rate, gen_ms
 
+
+async def _synthesize_response(
+    request: Request,
+    log,
+    text: str,
+    voice_instruct: Optional[str],
+    ref_audio_bytes: Optional[bytes],
+    prompt_text: Optional[str],
+    speed: float,
+    response_format: str,
+    cfg_value: float = 2.0,
+    inference_timesteps: int = 10,
+) -> Response:
+    """公共合成处理流程（异步卸载至工作线程池）"""
+    request_id = get_request_id(request)
+    start_total = time.perf_counter()
+
+    # 通过 use_tts_model 上下文保护活跃计数，防止看门狗在推理中卸载
+    with use_tts_model() as model:
+        audio_bytes, media_type, duration, sample_rate, gen_ms = await run_in_threadpool(
+            _sync_synthesize_task,
+            model=model,
+            text=text,
+            voice_instruct=voice_instruct,
+            ref_audio_bytes=ref_audio_bytes,
+            prompt_text=prompt_text,
+            speed=speed,
+            response_format=response_format,
+            cfg_value=cfg_value,
+            inference_timesteps=inference_timesteps,
+        )
+
+    total_ms = (time.perf_counter() - start_total) * 1000
     mode = "Clone" if ref_audio_bytes else "Design"
     log.info(
         f"✅ [VoxCPM2-{mode}] Synthesized {len(text)} chars → {len(audio_bytes)} bytes "
@@ -288,19 +312,18 @@ def _synthesize_response(
 async def create_speech(request: Request, req: SpeechRequest = Body(...)):
     """
     OpenAI 兼容的文字转语音与声音克隆接口（POST /v1/audio/speech）
-
-    - **voice**: OpenAI 预设音色名（alloy/nova/shimmer/...），或任意自然语言音色描述
-    - **instructions**: 情绪/语气/节奏指令（如“带微笑感，语速稍微放缓”）
-    - **reference_audio**: 可选，传入 Base64 编码的参考音频实现一键声音克隆
-    - **prompt_text**: 可选，参考音频对应的文本内容，开启极致保真克隆
-    - **response_format**: mp3 / wav / flac / ogg / opus / aac / pcm
-    - **speed**: 0.25 ~ 4.0 语速调节
     """
     request_id = get_request_id(request)
     log = logger.bind(request_id=request_id)
 
     if not req.input.strip():
         raise HTTPException(status_code=400, detail="Input cannot be empty")
+
+    if len(req.input) > MAX_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input text exceeds maximum allowed length of {MAX_TEXT_LENGTH} characters",
+        )
 
     fmt = req.response_format.lower().strip(".")
     if fmt == "oga":
@@ -316,12 +339,14 @@ async def create_speech(request: Request, req: SpeechRequest = Body(...)):
     if req.reference_audio:
         try:
             ref_bytes = parse_audio_data(req.reference_audio)
+            if len(ref_bytes) > MAX_AUDIO_BYTES:
+                raise ValueError(f"audio size exceeds {MAX_AUDIO_BYTES // 1048576}MB limit")
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid base64 reference_audio: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid reference_audio: {e}")
 
     try:
         voice_instruct = resolve_voice_instruct(req.voice, req.instructions)
-        return _synthesize_response(
+        return await _synthesize_response(
             request=request,
             log=log,
             text=req.input,
@@ -341,7 +366,7 @@ async def create_speech(request: Request, req: SpeechRequest = Body(...)):
             status_code=500,
             detail={
                 "error": "synthesis_failed",
-                "message": str(e),
+                "message": "TTS synthesis failed, please check server logs",
                 "request_id": request_id,
             },
         )
@@ -350,7 +375,7 @@ async def create_speech(request: Request, req: SpeechRequest = Body(...)):
 @router.post("/clone")
 async def clone_voice_multipart(
     request: Request,
-    file: UploadFile = File(..., description="参考音频文件（3~10秒为佳，支持 wav/mp3/ogg/flac/m4a 等）"),
+    file: UploadFile = File(..., description="参考音频文件（3~10秒为佳，支持 wav/mp3/ogg/flac/m4a 等，最大 25MB）"),
     text: str = Form(..., description="要合成的目标文本"),
     voice: Optional[str] = Form(None, description="可选音色风格补充"),
     instructions: Optional[str] = Form(None, description="可选情绪与语气控制（如：兴奋、悲伤、严肃）"),
@@ -362,14 +387,18 @@ async def clone_voice_multipart(
 ):
     """
     Multipart 表单声音克隆接口（支持直接上传音频文件）
-
-    上传说话人的一小段音频文件，直接克隆该声音朗读新文本，并支持文字控制语气情绪。
     """
     request_id = get_request_id(request)
     log = logger.bind(request_id=request_id)
 
     if not text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    if len(text) > MAX_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input text exceeds maximum allowed length of {MAX_TEXT_LENGTH} characters",
+        )
 
     fmt = response_format.lower().strip(".")
     if fmt == "oga":
@@ -385,9 +414,11 @@ async def clone_voice_multipart(
         ref_bytes = await file.read()
         if not ref_bytes:
             raise HTTPException(status_code=400, detail="Uploaded reference file is empty")
+        if len(ref_bytes) > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=400, detail=f"Reference audio exceeds maximum limit of {MAX_AUDIO_BYTES // 1048576}MB")
 
         voice_instruct = resolve_voice_instruct(voice, instructions)
-        return _synthesize_response(
+        return await _synthesize_response(
             request=request,
             log=log,
             text=text,
@@ -407,7 +438,7 @@ async def clone_voice_multipart(
             status_code=500,
             detail={
                 "error": "synthesis_failed",
-                "message": str(e),
+                "message": "TTS clone failed, please check server logs",
                 "request_id": request_id,
             },
         )
@@ -430,6 +461,12 @@ async def synthesize_speech(
     if not text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
+    if len(text) > MAX_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input text exceeds maximum allowed length of {MAX_TEXT_LENGTH} characters",
+        )
+
     fmt = response_format.lower().strip(".")
     if fmt == "oga":
         fmt = "ogg"
@@ -441,7 +478,7 @@ async def synthesize_speech(
         )
 
     try:
-        return _synthesize_response(
+        return await _synthesize_response(
             request=request,
             log=log,
             text=text,
@@ -459,7 +496,7 @@ async def synthesize_speech(
             status_code=500,
             detail={
                 "error": "synthesis_failed",
-                "message": str(e),
+                "message": "TTS synthesis failed, please check server logs",
                 "request_id": request_id,
             },
         )

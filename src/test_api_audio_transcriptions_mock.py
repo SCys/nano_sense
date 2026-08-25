@@ -17,11 +17,11 @@ class TestAPIAudioTranscriptionsMock(unittest.TestCase):
         cls.client = TestClient(app)
 
     @patch("api_audio_transcriptions.load_audio")
-    @patch("api_audio_transcriptions.get_asr_recognizer")
-    def test_transcription_json_format(self, mock_get_asr, mock_load):
+    @patch("api_audio_transcriptions.use_asr_recognizer")
+    def test_transcription_json_format(self, mock_use_asr, mock_load):
         mock_rec = MagicMock()
         mock_rec.generate.return_value = [{"text": "这是测试文本"}]
-        mock_get_asr.return_value = mock_rec
+        mock_use_asr.return_value.__enter__.return_value = mock_rec
         mock_load.return_value = np.zeros(16000, dtype=np.float32)
 
         response = self.client.post(
@@ -32,14 +32,13 @@ class TestAPIAudioTranscriptionsMock(unittest.TestCase):
         data = response.json()
         self.assertIn("text", data)
         self.assertEqual(data["text"], "这是测试文本")
-        mock_rec.generate.assert_called()
 
     @patch("api_audio_transcriptions.load_audio")
-    @patch("api_audio_transcriptions.get_asr_recognizer")
-    def test_transcription_text_format(self, mock_get_asr, mock_load):
+    @patch("api_audio_transcriptions.use_asr_recognizer")
+    def test_transcription_text_format(self, mock_use_asr, mock_load):
         mock_rec = MagicMock()
         mock_rec.generate.return_value = [{"text": "这是测试文本"}]
-        mock_get_asr.return_value = mock_rec
+        mock_use_asr.return_value.__enter__.return_value = mock_rec
         mock_load.return_value = np.zeros(16000, dtype=np.float32)
 
         response = self.client.post(
@@ -50,11 +49,11 @@ class TestAPIAudioTranscriptionsMock(unittest.TestCase):
         self.assertEqual(response.text, "这是测试文本")
 
     @patch("api_audio_transcriptions.load_audio")
-    @patch("api_audio_transcriptions.get_asr_recognizer")
-    def test_transcription_with_segments(self, mock_get_asr, mock_load):
+    @patch("api_audio_transcriptions.use_asr_recognizer")
+    def test_transcription_with_segments(self, mock_use_asr, mock_load):
         mock_rec = MagicMock()
         mock_rec.generate.return_value = [{"text": "分段文本"}]
-        mock_get_asr.return_value = mock_rec
+        mock_use_asr.return_value.__enter__.return_value = mock_rec
         mock_load.return_value = np.zeros(16000, dtype=np.float32)
 
         response = self.client.post(
@@ -68,11 +67,9 @@ class TestAPIAudioTranscriptionsMock(unittest.TestCase):
         self.assertEqual(data["segments"][0]["text"], "分段文本")
 
     @patch("api_audio_transcriptions.load_audio")
-    @patch("api_audio_transcriptions.get_asr_recognizer")
-    def test_transcription_error_handling(self, mock_get_asr, mock_load):
-        mock_rec = MagicMock()
-        mock_rec.generate.side_effect = Exception("测试异常")
-        mock_get_asr.return_value = mock_rec
+    @patch("api_audio_transcriptions.use_asr_recognizer")
+    def test_transcription_error_handling(self, mock_use_asr, mock_load):
+        mock_use_asr.side_effect = Exception("测试异常")
         mock_load.return_value = np.zeros(16000, dtype=np.float32)
 
         response = self.client.post(

@@ -1,6 +1,7 @@
 import base64
 import io
 import unittest
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -28,6 +29,11 @@ def make_mock_voxcpm_model():
     mock.tts_model.sample_rate = 48000
     mock.generate.return_value = make_wave(1.0, 48000)
     return mock
+
+
+@contextmanager
+def mock_use_tts(mock_model):
+    yield mock_model
 
 
 class TestResolveVoiceInstruct(unittest.TestCase):
@@ -70,11 +76,11 @@ class TestOpenAISpeech(unittest.TestCase):
         app.include_router(synthesis_router, prefix="/v1/audio")
         cls.client = TestClient(app)
 
-    @patch("api_audio_synthesis.get_tts_model")
-    def test_speech_mp3_default(self, mock_get_tts):
+    @patch("api_audio_synthesis.use_tts_model")
+    def test_speech_mp3_default(self, mock_use):
         """默认返回 48kHz mp3"""
         mock_model = make_mock_voxcpm_model()
-        mock_get_tts.return_value = mock_model
+        mock_use.return_value.__enter__.return_value = mock_model
 
         resp = self.client.post(
             "/v1/audio/speech",
@@ -94,10 +100,11 @@ class TestOpenAISpeech(unittest.TestCase):
         args, kwargs = mock_model.generate.call_args
         self.assertIn(OPENAI_VOICE_PRESETS["nova"], kwargs["text"])
 
-    @patch("api_audio_synthesis.get_tts_model")
-    def test_speech_wav_format(self, mock_get_tts):
+    @patch("api_audio_synthesis.use_tts_model")
+    def test_speech_wav_format(self, mock_use):
         """wav 格式输出"""
-        mock_get_tts.return_value = make_mock_voxcpm_model()
+        mock_model = make_mock_voxcpm_model()
+        mock_use.return_value.__enter__.return_value = mock_model
 
         resp = self.client.post(
             "/v1/audio/speech",
@@ -106,10 +113,11 @@ class TestOpenAISpeech(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.headers["content-type"], "audio/wav")
 
-    @patch("api_audio_synthesis.get_tts_model")
-    def test_speech_pcm_format(self, mock_get_tts):
+    @patch("api_audio_synthesis.use_tts_model")
+    def test_speech_pcm_format(self, mock_use):
         """pcm 16-bit 原始采样字节"""
-        mock_get_tts.return_value = make_mock_voxcpm_model()
+        mock_model = make_mock_voxcpm_model()
+        mock_use.return_value.__enter__.return_value = mock_model
 
         resp = self.client.post(
             "/v1/audio/speech",
@@ -120,13 +128,12 @@ class TestOpenAISpeech(unittest.TestCase):
         # 1 秒 48000 个采样 * 2 字节 = 96000 字节
         self.assertEqual(len(resp.content), 48000 * 2)
 
-    @patch("api_audio_synthesis.get_tts_model")
-    def test_speech_base64_clone(self, mock_get_tts):
+    @patch("api_audio_synthesis.use_tts_model")
+    def test_speech_base64_clone(self, mock_use):
         """通过 base64 传入参考音频执行声音克隆"""
         mock_model = make_mock_voxcpm_model()
-        mock_get_tts.return_value = mock_model
+        mock_use.return_value.__enter__.return_value = mock_model
 
-        # 生成 0.5s 测试音频作为 base64 参考
         buf = io.BytesIO()
         sf.write(buf, make_wave(0.5, 48000), 48000, format="WAV")
         b64_audio = base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -156,9 +163,9 @@ class TestOpenAISpeech(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
-    @patch("api_audio_synthesis.get_tts_model")
-    def test_speech_model_error(self, mock_get_tts):
-        mock_get_tts.side_effect = RuntimeError("CUDA OOM")
+    @patch("api_audio_synthesis.use_tts_model")
+    def test_speech_model_error(self, mock_use):
+        mock_use.side_effect = RuntimeError("CUDA OOM")
 
         resp = self.client.post(
             "/v1/audio/speech",
@@ -178,10 +185,10 @@ class TestVoiceCloneMultipart(unittest.TestCase):
         app.include_router(synthesis_router, prefix="/v1/audio")
         cls.client = TestClient(app)
 
-    @patch("api_audio_synthesis.get_tts_model")
-    def test_clone_multipart_success(self, mock_get_tts):
+    @patch("api_audio_synthesis.use_tts_model")
+    def test_clone_multipart_success(self, mock_use):
         mock_model = make_mock_voxcpm_model()
-        mock_get_tts.return_value = mock_model
+        mock_use.return_value.__enter__.return_value = mock_model
 
         buf = io.BytesIO()
         sf.write(buf, make_wave(0.5, 48000), 48000, format="WAV")
@@ -221,10 +228,10 @@ class TestSynthesizeBackwardCompat(unittest.TestCase):
         app.include_router(synthesis_router, prefix="/v1/audio")
         cls.client = TestClient(app)
 
-    @patch("api_audio_synthesis.get_tts_model")
-    def test_synthesize_query_params(self, mock_get_tts):
+    @patch("api_audio_synthesis.use_tts_model")
+    def test_synthesize_query_params(self, mock_use):
         mock_model = make_mock_voxcpm_model()
-        mock_get_tts.return_value = mock_model
+        mock_use.return_value.__enter__.return_value = mock_model
 
         resp = self.client.post(
             "/v1/audio/synthesize",
