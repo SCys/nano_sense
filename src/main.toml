@@ -2,18 +2,24 @@
 log_level = "INFO"
 
 [asr]
-timeout_seconds = 300
+timeout_seconds = 1800
 model_path = "./data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/"
+# 长音频切分与标点恢复；置空可关闭
+vad_model = "fsmn-vad"
+punc_model = "ct-punc"
+# 推理设备（cuda:0 = 性能最好的卡，可用 nvidia-smi 核对）
+device = "cuda:0"
 
 [tts]
-timeout_seconds = 300
+timeout_seconds = 1800
 model_path = "./data/openbmb/VoxCPM2"
+device = "cuda:0"
 
 [ultralytics]
-model_path = "./data/yolo11n.pt"
-timeout_seconds = 300
+model_path = "./data/yolo11s.pt"
+timeout_seconds = 1800
 
 [openai]
-api_key = "AIzaSyBbYJxTtwXh7pcK-OmSvZ3qxiM7gIkcMy0"
+# api_key 请通过环境变量 OPENAI_API_KEY 提供，不要写入本文件
 base_url = "http://10.1.3.26:8888/v1beta/openai"
-timeout_seconds = 300
+timeout_seconds = 1800

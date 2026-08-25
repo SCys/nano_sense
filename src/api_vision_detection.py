@@ -1,19 +1,13 @@
 import io
 import uuid
 from typing import List
-from fastapi import APIRouter, UploadFile, File, Request, HTTPException, Depends
-from pydantic import BaseModel, Field
+import torch
+from fastapi import APIRouter, UploadFile, File, Request, HTTPException
 from PIL import Image
 from loguru import logger
 from globals import get_vision_model
 
 router = APIRouter()
-
-
-class DetectionRequest(BaseModel):
-    """检测请求模型（Query参数）"""
-    # 目前接口只接收文件，但为了结构完整保留此模型
-    pass
 
 
 def get_request_id(request: Request) -> str:
@@ -28,7 +22,6 @@ def get_request_id(request: Request) -> str:
 async def detect_image(
     request: Request,
     image: UploadFile = File(...),
-    query_params: DetectionRequest = Depends(),
 ):
     """
     图像目标检测接口
@@ -46,7 +39,9 @@ async def detect_image(
         raw = Image.open(io.BytesIO(body))
 
         model = get_vision_model()  # 懒加载并更新访问时间
-        results = model.predict(raw, classes=0, device="gpu", verbose=False)
+        # ultralytics 不接受 "gpu"，需用 0 (cuda:0) 或 "cpu"
+        device = 0 if torch.cuda.is_available() else "cpu"
+        results = model.predict(raw, classes=0, device=device, verbose=False)
         predictions: List[dict] = []
 
         for result in results:

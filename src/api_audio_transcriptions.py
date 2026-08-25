@@ -8,6 +8,7 @@ from typing import Optional
 import librosa
 import numpy as np
 from fastapi import APIRouter, UploadFile, File, Request, HTTPException, Depends
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -57,7 +58,8 @@ def extract_text_from_funasr_result(asr_result) -> str:
 
 def load_audio(filename: str) -> np.ndarray:
     audio, sr = librosa.load(filename, sr=16000, mono=True)
-    assert sr == 16000
+    if sr != 16000:
+        raise RuntimeError(f"librosa failed to resample audio to 16kHz (got {sr}Hz)")
     return np.ascontiguousarray(audio, dtype=np.float32)
 
 
@@ -124,7 +126,7 @@ async def transcribe(
 
         # 日志（附加请求ID）
         log.info(
-            f"✅ [FireRedASR2-CTC] Transcribed {duration:.2f}s "
+            f"✅ [FunASR] Transcribed {duration:.2f}s "
             f"| size={size_human} "
             f"| receive={receive_ms:.1f}ms "
             f"| load={load_ms:.1f}ms "
@@ -139,7 +141,7 @@ async def transcribe(
         need_segments = (response_format == "verbose_json") or (timestamp_granularities is not None)
 
         if response_format == "text":
-            return text
+            return PlainTextResponse(content=text)
 
         result: dict = {"text": text}
         if need_segments:

@@ -66,10 +66,14 @@ class Config:
         return float(value)
 
     def getboolean(self, section, option, fallback=None):
-        """获取布尔值配置项"""
+        """获取布尔值配置项（正确处理字符串形式的布尔值）"""
         value = self.get(section, option, fallback)
         if value is None or value == fallback:
             return fallback
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
         return bool(value)
 
     def get_asr_config(self):
@@ -78,7 +82,15 @@ class Config:
             "asr", "model_path", "ASR_MODEL_PATH",
             fallback="/app/models/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         )
-        timeout_seconds = self.getint("asr", "timeout_seconds", fallback=300)
+        timeout_seconds = self.getint("asr", "timeout_seconds", fallback=1800)
+
+        # VAD（长音频切分）与标点恢复模型；设为空字符串可关闭
+        vad_model = self.get("asr", "vad_model", fallback="fsmn-vad")
+        punc_model = self.get("asr", "punc_model", fallback="ct-punc")
+
+        # 推理设备：cuda:0 / cuda:1 / cpu；默认自动选第一块可见卡
+        device = self._get_env_or_config("asr", "device", "ASR_DEVICE",
+                                         fallback="cuda:0")
 
         if not os.path.exists(model_path):
             logger.warning(f"ASR model path does not exist: {model_path}")
@@ -86,6 +98,9 @@ class Config:
         return {
             "timeout_seconds": timeout_seconds,
             "model_path": model_path,
+            "vad_model": vad_model or None,
+            "punc_model": punc_model or None,
+            "device": device,
         }
 
     def get_ultralytics_config(self):
@@ -94,13 +109,13 @@ class Config:
             "ultralytics", "model_path", "ULTRALYTICS_MODEL_PATH"
         )
         timeout_seconds = self.getint(
-            "ultralytics", "timeout_seconds", fallback=300
+            "ultralytics", "timeout_seconds", fallback=1800
         )
 
         if not model_path:
             raise ValueError(
                 "Ultralytics model path is required. Set it in main.toml "
-                "or via ULTURALYTICS_MODEL_PATH environment variable."
+                "or via ULTRALYTICS_MODEL_PATH environment variable."
             )
 
         if not os.path.exists(model_path):
@@ -120,7 +135,7 @@ class Config:
             "openai", "base_url", "OPENAI_BASE_URL"
         )
         timeout_seconds = self.getint(
-            "openai", "timeout_seconds", fallback=300
+            "openai", "timeout_seconds", fallback=1800
         )
 
         if not api_key:
@@ -139,15 +154,13 @@ class Config:
         """获取TTS配置（支持环境变量）"""
         model_path = self._get_env_or_config(
             "tts", "model_path", "TTS_MODEL_PATH",
-            fallback="./data/openbmb/VoxCPM",
+            fallback="./data/openbmb/VoxCPM2",
         )
-        timeout_seconds = self.getint("tts", "timeout_seconds", fallback=300)
-
-        if not model_path:
-            raise ValueError(
-                "TTS model path is required. Set it in main.toml "
-                "or via TTS_MODEL_PATH environment variable."
-            )
+        timeout_seconds = self.getint("tts", "timeout_seconds", fallback=1800)
+        device = self._get_env_or_config(
+            "tts", "device", "TTS_DEVICE",
+            fallback="cuda:0",
+        )
 
         if not os.path.exists(model_path):
             logger.warning(f"TTS model path does not exist: {model_path}")
@@ -155,6 +168,7 @@ class Config:
         return {
             "model_path": model_path,
             "timeout_seconds": timeout_seconds,
+            "device": device,
         }
 
 

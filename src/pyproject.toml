@@ -1,7 +1,7 @@
 [project]
-name = "src"
+name = "ai-services"
 version = "0.1.0"
-description = "Add your description here"
+description = "FastAPI-based AI services: ASR, TTS, embeddings, object detection"
 readme = "README.md"
 requires-python = "==3.11.*"
 dependencies = [
@@ -19,6 +19,8 @@ dependencies = [
     # TTS dependencies (Qwen3-TTS-ONNX)
     "onnxruntime-gpu>=1.18.0",
     "soundfile>=0.12.0",
+    "tokenizers>=0.15",
+    "voxcpm>=2.0.3",
 ]
 
 [project.optional-dependencies]

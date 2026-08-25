@@ -2,7 +2,7 @@ import threading
 import time
 import os
 import gc
-import sys
+import json
 from loguru import logger
 from openai import OpenAI
 import ultralytics
@@ -10,8 +10,19 @@ import funasr
 
 from config import config
 
+# 所有 ModelManager 实例注册表，供看门狗扫描
+_MODEL_MANAGERS = []
+_WATCHDOG_STARTED = False
+
 class ModelManager:
-    """管理模型的懒加载、超时自动卸载和重新加载"""
+    """管理模型的懒加载、超时自动下线和重新加载。
+
+    - get()：首次访问时加载；已加载则刷新访问时间并返回。
+    - 空闲超时由后台看门狗线程主动卸载（见 _start_unload_watchdog），
+      下次 get() 时重新加载。
+    - 注意：get() 持锁执行加载，同一模型的并发请求会串行等待；
+      这是刻意设计——避免大模型被并发重复加载撑爆显存。
+    """
 
     def __init__(self, loader, timeout_seconds, name="model"):
         self.loader = loader
@@ -20,30 +31,38 @@ class ModelManager:
         self._instance = None
         self._last_access = None
         self._lock = threading.Lock()
+        _MODEL_MANAGERS.append(self)
+
+    @property
+    def loaded(self):
+        return self._instance is not None
 
     def get(self):
         with self._lock:
-            now = time.time()
             if self._instance is None:
                 logger.info(f"[{self.name}] Loading model (first access)...")
                 self._instance = self.loader()
-                self._last_access = now
-                return self._instance
-            # 检查是否超时
-            if self._last_access is not None and (now - self._last_access) > self.timeout:
+            self._last_access = time.time()
+            return self._instance
+
+    def unload_if_idle(self):
+        """若空闲时间超过 timeout 则卸载模型。
+
+        由看门狗线程周期性调用；返回是否执行了卸载。
+        卸载后下次 get() 会重新加载。
+        """
+        with self._lock:
+            if self._instance is None or self._last_access is None:
+                return False
+            idle = time.time() - self._last_access
+            if idle >= self.timeout:
                 logger.info(
-                    f"[{self.name}] Model idle for {now - self._last_access:.1f}s, "
-                    f"exceeding timeout {self.timeout}s. Unloading and reloading..."
+                    f"[{self.name}] Idle for {idle:.0f}s >= timeout {self.timeout}s, "
+                    f"auto-unloading..."
                 )
-                # 显式清理资源
                 self._unload_model()
-                # 重新加载
-                self._instance = self.loader()
-                self._last_access = now
-                return self._instance
-            else:
-                self._last_access = now
-                return self._instance
+                return True
+            return False
 
     def _unload_model(self):
         """卸载模型并清理资源"""
@@ -71,16 +90,27 @@ class ModelManager:
 def _load_funasr_recognizer():
     """
     from https://github.com/modelscope/FunASR/blob/main/README_zh.md
+
+    挂载 fsmn-vad（长音频切分）与 ct-punc（中文标点恢复/断句），
+    可在 main.toml [asr] 里用 vad_model="" / punc_model="" 关闭。
     """
     asr_config = config.get_asr_config()
 
     model_path = asr_config["model_path"]
-    logger.info(f"Loading funasr recognizer from {model_path}...")
-    return funasr.AutoModel(
-        model=model_path,
-        device="cuda:0",
-        disable_update=True,
-    )
+    kwargs = {
+        "model": model_path,
+        "device": asr_config.get("device", "cuda:0"),
+        "disable_update": True,
+    }
+    if asr_config.get("vad_model"):
+        kwargs["vad_model"] = asr_config["vad_model"]
+        kwargs["vad_kwargs"] = {"max_single_segment_time": 30000}
+    if asr_config.get("punc_model"):
+        kwargs["punc_model"] = asr_config["punc_model"]
+
+    logger.info(f"Loading funasr recognizer from {model_path} "
+                f"(vad={asr_config.get('vad_model')}, punc={asr_config.get('punc_model')})...")
+    return funasr.AutoModel(**kwargs)
 
 # Vision model loader
 def _load_vision_model():
@@ -92,6 +122,7 @@ def _load_vision_model():
 
 # OpenAI client loader
 def _load_openai_client():
+    # 延迟到首次调用才校验 api_key，避免未使用 embeddings 的部署因缺少 key 无法启动
     openai_config = config.get_openai_config()
     logger.info("Loading OpenAI client...")
     return OpenAI(
@@ -100,60 +131,25 @@ def _load_openai_client():
     )
 
 
-# TTS model loader (Qwen3-TTS-ONNX)
+# TTS model loader (VoxCPM2)
 def _load_tts_model():
+    """加载 OpenBMB VoxCPM2 模型。
+
+    支持 30 种语言、48kHz 高采样率、声音设计（文本描述）与声音克隆（参考音频）。
+    """
     tts_config = config.get_tts_config()
     model_path = tts_config["model_path"]
-    logger.info(f"Loading Qwen3-TTS model from {model_path}...")
+    device = tts_config.get("device", "cuda:0")
+    logger.info(f"Loading VoxCPM2 model from {model_path} on {device}...")
 
-    try:
-        import onnxruntime as ort
-        import numpy as np
-        import soundfile as sf
-
-        # 创建 ONNX Runtime session
-        sess_options = ort.SessionOptions()
-        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = 4
-
-        # 查找 ONNX 模型文件
-        onnx_file = None
-        for root, dirs, files in os.walk(model_path):
-            for f in files:
-                if f.endswith(".onnx"):
-                    onnx_file = os.path.join(root, f)
-                    break
-            if onnx_file:
-                break
-
-        if not onnx_file:
-            raise FileNotFoundError(f"No .onnx file found in {model_path}")
-
-        # 创建 session（使用 CUDA）
-        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-        session = ort.InferenceSession(onnx_file, sess_options, providers=providers)
-
-        # 获取输入输出名称
-        inputs = session.get_inputs()
-        outputs = session.get_outputs()
-
-        logger.info(f"TTS model loaded: {onnx_file}")
-        logger.info(f"Inputs: {[i.name for i in inputs]}")
-        logger.info(f"Outputs: {[o.name for o in outputs]}")
-
-        return {
-            "session": session,
-            "inputs": {i.name: i for i in inputs},
-            "outputs": {o.name: o for o in outputs},
-            "model_path": model_path,
-        }
-
-    except ImportError:
-        logger.warning("onnxruntime not installed, installing...")
-        raise
-    except Exception as e:
-        logger.error(f"Failed to load TTS model: {e}")
-        raise
+    from voxcpm import VoxCPM
+    model = VoxCPM.from_pretrained(
+        model_path,
+        load_denoiser=False,
+        device=device,
+    )
+    logger.info(f"VoxCPM2 loaded successfully on {device} (sample_rate={model.tts_model.sample_rate})")
+    return model
 
 
 # 创建 ModelManager 实例（带名称用于日志追踪）
@@ -169,7 +165,7 @@ vision_manager = ModelManager(
 )
 openai_manager = ModelManager(
     _load_openai_client,
-    config.get_openai_config()["timeout_seconds"],
+    config.getint("openai", "timeout_seconds", fallback=300),
     name="OpenAI"
 )
 tts_manager = ModelManager(
@@ -190,3 +186,35 @@ def get_openai_client():
 
 def get_tts_model():
     return tts_manager.get()
+
+
+def _start_unload_watchdog(interval_seconds: int = 60):
+    """启动后台看门狗：周期性检查各模型空闲时长，超时则自动下线。
+
+    - interval_seconds：扫描间隔，默认 60s（卸载精度受此间隔影响）
+    - daemon 线程，进程退出时自动结束，不阻塞服务关闭
+    """
+    global _WATCHDOG_STARTED
+    if _WATCHDOG_STARTED:
+        return
+    _WATCHDOG_STARTED = True
+
+    def _loop():
+        while True:
+            time.sleep(interval_seconds)
+            for manager in list(_MODEL_MANAGERS):
+                try:
+                    if manager.unload_if_idle():
+                        logger.info(f"[{manager.name}] Model offline, will reload on next request")
+                except Exception as e:
+                    logger.warning(f"[{manager.name}] Unload watchdog error: {e}")
+
+    watchdog = threading.Thread(target=_loop, name="model-unload-watchdog", daemon=True)
+    watchdog.start()
+    logger.info(
+        f"Model unload watchdog started (interval={interval_seconds}s, "
+        f"managers={[m.name for m in _MODEL_MANAGERS]})"
+    )
+
+
+_start_unload_watchdog(60)
