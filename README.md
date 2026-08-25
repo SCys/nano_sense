@@ -42,6 +42,30 @@
 
 ---
 
+## 📦 模型下载链接与一键下载脚本
+
+服务启动前需确保模型文件已放置在 `data/` 目录下。本项目提供了自动下载脚本，支持 ModelScope（国内高速）与 HuggingFace 源：
+
+### 1. 一键脚本下载（推荐）
+
+```bash
+# 执行 Bash 脚本自动下载全部模型
+./scripts/download_models.sh
+
+# 或者使用 Python 脚本（支持局部下载参数：--asr / --tts / --vision）
+python scripts/download_models.py --source modelscope
+```
+
+### 2. 官方模型下载链接对照表
+
+| 模型用途 | 选定模型 | 官方仓库地址与下载方式 | 本地存放目录 |
+|---|---|---|---|
+| 🎙️ **ASR 识别** | FunASR SeACo-Paraformer Large | [ModelScope iic/speech_seaco_paraformer...](https://www.modelscope.cn/models/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch)<br>`modelscope download --model iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch --local_dir data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch` | `data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch` |
+| 🔊 **TTS 合成/克隆** | OpenBMB VoxCPM2 (2B) | [ModelScope openbmb/VoxCPM2](https://www.modelscope.cn/models/openbmb/VoxCPM2) / [HuggingFace openbmb/VoxCPM2](https://huggingface.co/openbmb/VoxCPM2)<br>`modelscope download --model openbmb/VoxCPM2 --local_dir data/openbmb/VoxCPM2` | `data/openbmb/VoxCPM2` |
+| 👁️ **目标检测** | Ultralytics YOLO11s | [GitHub Releases v8.3.0](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt)<br>`curl -L -o data/yolo11s.pt https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt` | `data/yolo11s.pt` |
+
+---
+
 ## 🚀 快速启动
 
 ### 方式一：Docker Compose（推荐，开箱即用）
