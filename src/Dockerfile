@@ -3,12 +3,10 @@ FROM python:3.11-slim AS deps-builder
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive PIP_PREFER_BINARY=1
 
-RUN sed -i 's/deb.debian.org/mirrors.cernet.edu.cn/g' /etc/apt/sources.list.d/debian.sources
-
 WORKDIR /build
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir uv --index https://mirrors.cernet.edu.cn/pypi/web/simple
+    pip install --no-cache-dir uv
 
 COPY ./pyproject.toml ./uv.lock ./
 
@@ -18,16 +16,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --prune torch --prune torchvision --prune torchaudio \
     -o requirements.txt
 
-
 FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive PIP_PREFER_BINARY=1
-
-# chinese mirror
-RUN \
-  sed -i 's/archive.ubuntu.com/mirrors.cernet.edu.cn/g' /etc/apt/sources.list && \
-  sed -i 's/security.ubuntu.com/mirrors.cernet.edu.cn/g' /etc/apt/sources.list
 
 RUN --mount=type=cache,target=/var/cache/apt \
   apt-get update && \
@@ -42,10 +34,10 @@ RUN python --version
 
 COPY --from=deps-builder /build/requirements.txt ./requirements.txt
 
+ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt \
-    --index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
-    --extra-index-url https://pypi.org/simple
+    --index-url ${PIP_INDEX_URL}
 
 COPY . .
 
