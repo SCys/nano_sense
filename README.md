@@ -42,27 +42,49 @@
 
 ---
 
-## 📦 模型下载链接与一键下载脚本
+## 📦 模型下载列表与一键下载 (Model Downloads)
 
-服务启动前需确保模型文件已放置在 `data/` 目录下。本项目提供了自动下载脚本，支持 ModelScope（国内高速）与 HuggingFace 源：
+服务启动前需确保模型文件已放置在 `data/` 目录下。本项目提供了完整的官方直链对照表及一键自动下载脚本，支持 ModelScope（国内高速镜像）与 HuggingFace 源：
 
-### 1. 一键脚本下载（推荐）
+### 1. 官方模型下载直链对照表
+
+| 业务分类 | 模型组件 | 官方模型 ID / 直链 | 存放目录 (相对于项目根目录) | 模型大小 | 说明 |
+|---|---|---|---|---|---|
+| 🎙️ **ASR 识别** | **SeACo-Paraformer Large** (主模型) | [ModelScope iic/speech_seaco_paraformer_large...](https://www.modelscope.cn/models/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch) | `data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch` | ~953 MB | 核心声学识别模型（5万小时工业普通话/方言） |
+| 🎙️ **ASR 切片** | **FSMN-VAD** (语音切分) | [ModelScope iic/speech_fsmn_vad_zh-cn-16k-common-pytorch](https://www.modelscope.cn/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch) | 自动缓存或 `data/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch` | ~3.9 MB | 自动过滤静音，实现长音频智能分段 |
+| 🎙️ **ASR 标点** | **CT-Transformer Punc** (标点断句) | [ModelScope iic/punc_ct-transformer_cn-en-common-vocab471067-large](https://www.modelscope.cn/models/iic/punc_ct-transformer_cn-en-common-vocab471067-large) | 自动缓存或 `data/iic/punc_ct-transformer_cn-en-common-vocab471067-large` | ~1.2 GB | 中英文智能标点恢复与断句排版 |
+| 🔊 **TTS 合成/克隆** | **OpenBMB VoxCPM2** (2B) | **ModelScope**: [openbmb/VoxCPM2](https://www.modelscope.cn/models/openbmb/VoxCPM2)<br>**HuggingFace**: [openbmb/VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | `data/openbmb/VoxCPM2` | ~4.7 GB | 48kHz 录音室采样率、支持音色设计与参考音频克隆 |
+| 👁️ **目标检测** | **Ultralytics YOLO11s** (默认) | [GitHub Releases v8.3.0/yolo11s.pt](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt) | `data/yolo11s.pt` | ~19 MB | COCO 80 类别检测 (47.0% mAP) |
+| 👁️ **目标检测 (备选)** | **Ultralytics YOLO11n** (超轻量) | [GitHub Releases v8.3.0/yolo11n.pt](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt) | `data/yolo11n.pt` | ~5.4 MB | 极致轻量版 (39.5% mAP) |
+
+### 2. 命令行快速下载方式
 
 ```bash
-# 执行 Bash 脚本自动下载全部模型
-./scripts/download_models.sh
+# 1. 下载 YOLO11s 目标检测权重
+curl -L -o data/yolo11s.pt https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt
 
-# 或者使用 Python 脚本（支持局部下载参数：--asr / --tts / --vision）
-python scripts/download_models.py --source modelscope
+# 2. 通过 ModelScope 下载 FunASR 识别主模型
+modelscope download --model iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch --local_dir data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
+
+# 3. 通过 ModelScope / HuggingFace 下载 VoxCPM2 语音合成/克隆模型
+modelscope download --model openbmb/VoxCPM2 --local_dir data/openbmb/VoxCPM2
+# 或使用 HuggingFace:
+# huggingface-cli download openbmb/VoxCPM2 --local-dir data/openbmb/VoxCPM2
 ```
 
-### 2. 官方模型下载链接对照表
+### 3. 一键自动下载脚本
 
-| 模型用途 | 选定模型 | 官方仓库地址与下载方式 | 本地存放目录 |
-|---|---|---|---|
-| 🎙️ **ASR 识别** | FunASR SeACo-Paraformer Large | [ModelScope iic/speech_seaco_paraformer...](https://www.modelscope.cn/models/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch)<br>`modelscope download --model iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch --local_dir data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch` | `data/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch` |
-| 🔊 **TTS 合成/克隆** | OpenBMB VoxCPM2 (2B) | [ModelScope openbmb/VoxCPM2](https://www.modelscope.cn/models/openbmb/VoxCPM2) / [HuggingFace openbmb/VoxCPM2](https://huggingface.co/openbmb/VoxCPM2)<br>`modelscope download --model openbmb/VoxCPM2 --local_dir data/openbmb/VoxCPM2` | `data/openbmb/VoxCPM2` |
-| 👁️ **目标检测** | Ultralytics YOLO11s | [GitHub Releases v8.3.0](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt)<br>`curl -L -o data/yolo11s.pt https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt` | `data/yolo11s.pt` |
+```bash
+# 执行 Bash 脚本一键下载全部所需模型 (包含 ASR/TTS/Vision)
+./scripts/download_models.sh
+
+# 或者使用 Python 脚本按需指定下载项
+python scripts/download_models.py --all           # 下载全部模型 (默认)
+python scripts/download_models.py --tts           # 仅下载 VoxCPM2
+python scripts/download_models.py --asr           # 仅下载 ASR 全栈模型
+python scripts/download_models.py --vision        # 仅下载 YOLO11s
+python scripts/download_models.py --source huggingface  # 指定从 HuggingFace 下载
+```
 
 ---
 

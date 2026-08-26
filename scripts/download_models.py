@@ -2,9 +2,10 @@
 """
 AI 服务模型一键下载脚本
 支持下载当前服务所需的全部模型：
-1. ASR: FunASR SeACo-Paraformer (ModelScope)
-2. TTS: OpenBMB VoxCPM2 (ModelScope / HuggingFace)
-3. Vision: Ultralytics YOLO11s (GitHub Releases)
+1. ASR 主模型: FunASR SeACo-Paraformer Large (ModelScope)
+2. ASR 辅助模型: FSMN-VAD & CT-Punc (ModelScope)
+3. TTS 模型: OpenBMB VoxCPM2 (ModelScope / HuggingFace)
+4. Vision 模型: Ultralytics YOLO11s (GitHub Releases)
 """
 
 import argparse
@@ -23,8 +24,20 @@ MODELS = {
         "modelscope_id": "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         "git_url": "https://www.modelscope.cn/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch.git",
     },
+    "vad": {
+        "name": "FunASR FSMN-VAD (语音活动检测)",
+        "target_dir": os.path.join(DATA_DIR, "iic", "speech_fsmn_vad_zh-cn-16k-common-pytorch"),
+        "modelscope_id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "git_url": "https://www.modelscope.cn/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch.git",
+    },
+    "punc": {
+        "name": "FunASR CT-Transformer Punc (标点恢复)",
+        "target_dir": os.path.join(DATA_DIR, "iic", "punc_ct-transformer_cn-en-common-vocab471067-large"),
+        "modelscope_id": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
+        "git_url": "https://www.modelscope.cn/iic/punc_ct-transformer_cn-en-common-vocab471067-large.git",
+    },
     "tts": {
-        "name": "OpenBMB VoxCPM2",
+        "name": "OpenBMB VoxCPM2 (TTS & 声音克隆)",
         "target_dir": os.path.join(DATA_DIR, "openbmb", "VoxCPM2"),
         "modelscope_id": "openbmb/VoxCPM2",
         "huggingface_id": "openbmb/VoxCPM2",
@@ -62,7 +75,7 @@ def download_file(url: str, output_path: str):
 
 
 def download_repo(model_key: str, source: str = "modelscope"):
-    """下载目录型模型（优先使用 SDK，回退使用 git lfs clone）"""
+    """下载目录型模型（优先使用 SDK，回退使用 git clone）"""
     cfg = MODELS[model_key]
     target_dir = cfg["target_dir"]
 
@@ -82,7 +95,7 @@ def download_repo(model_key: str, source: str = "modelscope"):
             print(f"✅ [{cfg['name']}] 下载完成！")
             return
         except ImportError:
-            print("  (未安装 modelscope，尝试 git lfs clone)")
+            print("  (未安装 modelscope，尝试 git clone)")
         except Exception as e:
             print(f"  ModelScope SDK 下载报错: {e}，尝试 git clone...")
 
@@ -108,27 +121,26 @@ def download_repo(model_key: str, source: str = "modelscope"):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AI Services 模型一键下载工具")
+    parser = argparse.ArgumentParser(description="NanoSense 模型一键下载工具")
     parser.add_argument("--all", action="store_true", default=True, help="下载全部模型 (默认)")
-    parser.add_argument("--asr", action="store_true", help="仅下载 ASR 识别模型 (SeACo-Paraformer)")
-    parser.add_argument("--tts", action="store_true", help="仅下载 TTS 语音合成与克隆模型 (VoxCPM2)")
+    parser.add_argument("--asr", action="store_true", help="仅下载 ASR 识别全栈模型 (SeACo-Paraformer + VAD + Punc)")
+    parser.add_argument("--tts", action="store_true", help="仅下载 TTS 语音合成与声音克隆模型 (VoxCPM2)")
     parser.add_argument("--vision", action="store_true", help="仅下载目标检测模型 (YOLO11s)")
     parser.add_argument("--source", choices=["modelscope", "huggingface"], default="modelscope",
                         help="下载源 (国内推荐 modelscope，默认)")
 
     args = parser.parse_args()
 
-    # 局部选择
     select_specific = args.asr or args.tts or args.vision
     download_asr = args.asr or not select_specific
     download_tts = args.tts or not select_specific
     download_vision = args.vision or not select_specific
 
-    print("=" * 60)
-    print("AI Services 模型下载管理器")
-    print(f"数据存放目录: {DATA_DIR}")
-    print(f"默认优先镜像: {args.source}")
-    print("=" * 60)
+    print("=" * 65)
+    print("🤖 NanoSense 模型下载管理器")
+    print(f"📁 数据存放目录: {DATA_DIR}")
+    print(f"🌐 默认优先镜像: {args.source}")
+    print("=" * 65)
 
     if download_vision:
         print(f"\n🎯 目标检测模型: {MODELS['vision']['name']}")
@@ -136,13 +148,16 @@ def main():
 
     if download_asr:
         download_repo("asr", source=args.source)
+        # 如果需要完全离线运行，也可以预下载 VAD 和 PUNC
+        download_repo("vad", source=args.source)
+        download_repo("punc", source=args.source)
 
     if download_tts:
         download_repo("tts", source=args.source)
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 65)
     print("🎉 选定模型已全部准备就绪！")
-    print("=" * 60)
+    print("=" * 65)
 
 
 if __name__ == "__main__":
