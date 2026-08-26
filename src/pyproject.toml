@@ -1,7 +1,7 @@
 [project]
-name = "ai-services"
+name = "nanosense"
 version = "0.1.0"
-description = "FastAPI-based AI services: ASR, TTS, embeddings, object detection"
+description = "NanoSense: Lightweight Multi-Modal AI Inference Gateway (ASR, TTS, Vision, Embeddings)"
 readme = "README.md"
 requires-python = "==3.11.*"
 dependencies = [

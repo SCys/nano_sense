@@ -15,7 +15,7 @@ async def lifespan(app: FastAPI):
     logger.info("Server shutting down...")
 
 
-app = FastAPI(title="AI Services API", lifespan=lifespan)
+app = FastAPI(title="NanoSense API", description="Lightweight Multi-Modal AI Inference Gateway", version="0.1.0", lifespan=lifespan)
 
 # 注册路由
 app.include_router(audio_router, prefix="/v1/audio")
