@@ -6,6 +6,7 @@ from api_audio_transcriptions import router as audio_router
 from api_audio_synthesis import router as synthesis_router
 from api_embeddings import router as embeddings_router
 from api_vision_detection import router as vision_router
+from api_rerank import router as rerank_router
 
 
 @asynccontextmanager
@@ -22,6 +23,7 @@ app.include_router(audio_router, prefix="/v1/audio")
 app.include_router(synthesis_router, prefix="/v1/audio")
 app.include_router(embeddings_router, prefix="/v1")
 app.include_router(vision_router, prefix="/v1/vision")
+app.include_router(rerank_router, prefix="/v1")
 
 
 if __name__ == "__main__":

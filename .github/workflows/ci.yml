@@ -46,6 +46,7 @@ jobs:
         working-directory: ./src
         run: |
           uv run python -m unittest test_model_manager \
+                                   test_api_rerank \
                                    test_api_audio_synthesis \
                                    test_api_audio_transcriptions_mock \
                                    test_api_vision_detection \

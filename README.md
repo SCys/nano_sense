@@ -15,6 +15,7 @@
 | 🧬 **声音克隆 (Cloning)** | `POST /v1/audio/clone`<br>*(或 `/v1/audio/speech` 传 Base64)* | **VoxCPM2 复合克隆引擎**<br>• **3~10 秒极速音色复刻**<br>• **克隆+情绪微调**（复刻音色同时叠加语气）<br>• **极清克隆**（配合原台词极致保真） | **Tesla T10** (`cuda:0`) | 专属声音定制、角色声音复刻、个性化配音 |
 | 👁️ **目标检测 (Vision)** | `POST /v1/vision/detection` | **Ultralytics YOLO11s**<br>• 毫秒级快速图像检测<br>• 输出精确边界框 (Bounding Box) 与置信度 | **Tesla T10** (`cuda:0`) | 人体/人脸识别、安防监控、画面内容分析 |
 | 📝 **文本嵌入 (Embeddings)** | `POST /v1/embeddings` | **OpenAI 兼容 Embeddings**<br>• 支持单条/批量文本向量化<br>• 适配知识库召回检索 | 远程网关 | RAG 知识库检索、语义搜索、文本聚类 |
+| 🔀 **文档重排 (Rerank)** | `POST /v1/rerank` | **BAAI bge-reranker-v2-m3** (5.6亿参数)<br>• **Cohere/Jina 兼容接口**<br>• 多语言跨语种精准相关度打分<br>• Sigmoid 归一化得分 `[0, 1]` | **Tesla T10** (`cuda:0`) | RAG 知识库精排、精准语义过滤、搜索相关性重排 |
 
 ---
 
@@ -30,8 +31,9 @@
   ┌─────────────────────────────────────┐                                 ┌─────────────────────────────────────┐
   │  🎙️ FunASR 全栈语音识别            │                                 │  🔊 VoxCPM2 语音合成与声音克隆      │
   │  • Paraformer + VAD + CT-Punc       │                                 │  • 20亿参数，48kHz 采样率           │
-  │  • 显存占用: ~2.19 GB (余量 1.9GB)  │                                 │  • 显存占用: ~5.2 GB (余量 10.8GB)  │
+  │  • 显存占用: ~2.19 GB (余量 1.9GB)  │                                 │  • 显存占用: ~5.2 GB (余量 9.7GB)   │
   │  • RTF: 0.329 (比实时快 3 倍)       │                                 │  ─────────────────────────────────  │
+  │                                     │                                 │  🔀 bge-reranker-v2-m3 (占 ~1.1GB)  │
   │                                     │                                 │  👁️ YOLO11s 视觉检测 (占 ~25MB)    │
   └─────────────────────────────────────┘                                 └─────────────────────────────────────┘
 ```
@@ -54,6 +56,7 @@
 | 🎙️ **ASR 切片** | **FSMN-VAD** (语音切分) | [ModelScope iic/speech_fsmn_vad_zh-cn-16k-common-pytorch](https://www.modelscope.cn/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch) | 自动缓存或 `data/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch` | ~3.9 MB | 自动过滤静音，实现长音频智能分段 |
 | 🎙️ **ASR 标点** | **CT-Transformer Punc** (标点断句) | [ModelScope iic/punc_ct-transformer_cn-en-common-vocab471067-large](https://www.modelscope.cn/models/iic/punc_ct-transformer_cn-en-common-vocab471067-large) | 自动缓存或 `data/iic/punc_ct-transformer_cn-en-common-vocab471067-large` | ~1.2 GB | 中英文智能标点恢复与断句排版 |
 | 🔊 **TTS 合成/克隆** | **OpenBMB VoxCPM2** (2B) | **ModelScope**: [openbmb/VoxCPM2](https://www.modelscope.cn/models/openbmb/VoxCPM2)<br>**HuggingFace**: [openbmb/VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | `data/openbmb/VoxCPM2` | ~4.7 GB | 48kHz 录音室采样率、支持音色设计与参考音频克隆 |
+| 🔀 **文档重排 (Rerank)** | **BAAI bge-reranker-v2-m3** | **ModelScope**: [BAAI/bge-reranker-v2-m3](https://www.modelscope.cn/models/BAAI/bge-reranker-v2-m3)<br>**HuggingFace**: [BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) | `data/BAAI/bge-reranker-v2-m3` | ~1.1 GB (FP16) | 100+ 语言多模态 Cross-Encoder 语义精排模型 |
 | 👁️ **目标检测** | **Ultralytics YOLO11s** (默认) | [GitHub Releases v8.3.0/yolo11s.pt](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt) | `data/yolo11s.pt` | ~19 MB | COCO 80 类别检测 (47.0% mAP) |
 | 👁️ **目标检测 (备选)** | **Ultralytics YOLO11n** (超轻量) | [GitHub Releases v8.3.0/yolo11n.pt](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt) | `data/yolo11n.pt` | ~5.4 MB | 极致轻量版 (39.5% mAP) |
 
@@ -226,6 +229,55 @@ curl http://localhost:5015/v1/embeddings \
 
 ---
 
+### 6. 文档重排 (`POST /v1/rerank`)
+
+支持标准 Cohere / Jina 协议，输入检索 Query 和多个候选 Documents，输出按语义相关度降序排列的精排列表：
+
+```bash
+curl http://localhost:5015/v1/rerank \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bge-reranker-v2-m3",
+    "query": "NanoSense 的显存管理机制是什么？",
+    "documents": [
+      "NanoSense 采用 30 分钟无请求看门狗自动释放显存到 0 MB。",
+      "YOLO11s 是当前默认的图像目标检测模型。",
+      "VoxCPM2 是一个 48kHz 采样率的语音合成与克隆模型。"
+    ],
+    "top_n": 2,
+    "return_documents": true
+  }'
+```
+
+**返回示例**：
+```json
+{
+  "id": "rerank-7f8a9b2c1234",
+  "results": [
+    {
+      "index": 0,
+      "relevance_score": 0.9800,
+      "document": {
+        "text": "NanoSense 采用 30 分钟无请求看门狗自动释放显存到 0 MB。"
+      }
+    },
+    {
+      "index": 1,
+      "relevance_score": 0.0001,
+      "document": {
+        "text": "YOLO11s 是当前默认的图像目标检测模型。"
+      }
+    }
+  ],
+  "model": "bge-reranker-v2-m3",
+  "usage": {
+    "total_tokens": 86
+  }
+}
+```
+
+---
+
 ## 📊 模型选型与评测记录（重要：勿重复评估）
 
 > 本节记录已完成的模型选型结论与实测对比。未来更换/新增模型前请先阅读，避免重新下载已被否决的候选。
@@ -278,3 +330,12 @@ curl http://localhost:5015/v1/embeddings \
 * **选定理由**：在 GPU 服务器上相比 Nano 版本（39.5% mAP）带来大幅精度提升（+7.5 mAP），单帧延迟依然稳定在 18~19ms（50+ FPS），是性价比最高的中台视觉模型。
 * **已清理的冗余视觉权重（2026-08）**：
   * 删除 `yolo11n.pt`、`yolo26n.pt`、`yolo26s.pt`、`yoloe-11s-seg.pt`、`yoloe-11s-seg-pf.pt`、`mobile_sam.pt`。
+
+---
+
+### 4. 文本重排 (Rerank) 选型 —— 选定 `BAAI/bge-reranker-v2-m3`（2026-08）
+* 选定 **`BAAI/bge-reranker-v2-m3`**（567M 参数，权重已转存为 FP16，磁盘仅占 **1.1 GB**，显存占 **~1.13 GB**）。
+* **选定理由**：
+  1. 采用 XLM-RoBERTa 多语言 Cross-Encoder 架构，支持 100+ 语言的高精度多语言与代码语义检索重排。
+  2. 显存开销极低（~1.1GB），单次批量相关性打分仅需数十毫秒，完美契合中台高并发 RAG 检索需求。
+  3. 接口对齐 Cohere / Jina 标准规范，支持纯文本与结构化字典输入。

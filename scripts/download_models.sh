@@ -56,6 +56,20 @@ else
     echo "✅ [TTS] VoxCPM2 下载完成！"
 fi
 
+# 4. 下载 BAAI bge-reranker-v2-m3 (约 1.1GB FP16)
+RERANK_DIR="${DATA_DIR}/BAAI/bge-reranker-v2-m3"
+if [ -d "${RERANK_DIR}" ] && [ "$(ls -A "${RERANK_DIR}" 2>/dev/null)" ]; then
+    echo "✅ [Rerank] bge-reranker-v2-m3 已存在: ${RERANK_DIR}"
+else
+    echo "📥 [Rerank] 正在下载 BAAI bge-reranker-v2-m3..."
+    if command -v modelscope &> /dev/null; then
+        modelscope download --model BAAI/bge-reranker-v2-m3 --local_dir "${RERANK_DIR}"
+    else
+        git clone https://www.modelscope.cn/BAAI/bge-reranker-v2-m3.git "${RERANK_DIR}"
+    fi
+    echo "✅ [Rerank] bge-reranker-v2-m3 下载完成！"
+fi
+
 echo "=================================================="
 echo "🎉 全部模型下载与检查完毕！"
 echo "=================================================="

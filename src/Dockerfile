@@ -35,9 +35,11 @@ RUN python --version
 COPY --from=deps-builder /build/requirements.txt ./requirements.txt
 
 ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_EXTRA_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt \
-    --index-url ${PIP_INDEX_URL}
+    --index-url ${PIP_INDEX_URL} \
+    --extra-index-url ${PIP_EXTRA_INDEX_URL}
 
 COPY . .
 

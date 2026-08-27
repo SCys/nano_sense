@@ -23,3 +23,8 @@ timeout_seconds = 1800
 timeout_seconds = 1800
 model_path = "./data/openbmb/VoxCPM2"
 device = "cuda:0"
+
+[rerank]
+timeout_seconds = 1800
+model_path = "./data/BAAI/bge-reranker-v2-m3"
+device = "cuda:0"

@@ -245,6 +245,47 @@ tts_manager = ModelManager(
 )
 
 
+# Rerank model loader (BAAI/bge-reranker-v2-m3)
+def _load_rerank_model():
+    """加载 BAAI/bge-reranker-v2-m3 文本重排模型。"""
+    rerank_config = config.get_rerank_config()
+    model_path = rerank_config["model_path"]
+    device = rerank_config.get("device", "cuda:0")
+    logger.info(f"Loading Rerank model from {model_path} on {device}...")
+
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    dtype = torch.float16 if device.startswith("cuda") and torch.cuda.is_available() else torch.float32
+
+    try:
+        model = AutoModelForSequenceClassification.from_pretrained(model_path, dtype=dtype)
+        model.to(device)
+        model.eval()
+        logger.info(f"Rerank model loaded successfully on {device}")
+        return tokenizer, model
+    except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+        if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
+            logger.warning(f"GPU {device} out of memory when loading Rerank model ({e}), falling back to CPU...")
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            model = AutoModelForSequenceClassification.from_pretrained(model_path, dtype=torch.float32)
+            model.to("cpu")
+            model.eval()
+            logger.info("Rerank model loaded successfully on CPU (fallback mode)")
+            return tokenizer, model
+        raise
+
+
+rerank_manager = ModelManager(
+    _load_rerank_model,
+    config.get_rerank_config()["timeout_seconds"],
+    name="Rerank",
+)
+
+
 # 提供获取模型的函数与上下文管理器
 def get_asr_recognizer():
     return asr_manager.get()
@@ -276,6 +317,14 @@ def get_tts_model():
 
 def use_tts_model():
     return tts_manager.use()
+
+
+def get_rerank_model():
+    return rerank_manager.get()
+
+
+def use_rerank_model():
+    return rerank_manager.use()
 
 
 def _start_unload_watchdog(interval_seconds: int = 60):

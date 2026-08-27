@@ -49,6 +49,14 @@ MODELS = {
         "target_file": os.path.join(DATA_DIR, "yolo11s.pt"),
         "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt",
     },
+    "rerank": {
+        "name": "BAAI bge-reranker-v2-m3 (文本重排)",
+        "target_dir": os.path.join(DATA_DIR, "BAAI", "bge-reranker-v2-m3"),
+        "modelscope_id": "BAAI/bge-reranker-v2-m3",
+        "huggingface_id": "BAAI/bge-reranker-v2-m3",
+        "git_url_ms": "https://www.modelscope.cn/BAAI/bge-reranker-v2-m3.git",
+        "git_url_hf": "https://huggingface.co/BAAI/bge-reranker-v2-m3",
+    },
 }
 
 
@@ -126,15 +134,17 @@ def main():
     parser.add_argument("--asr", action="store_true", help="仅下载 ASR 识别全栈模型 (SeACo-Paraformer + VAD + Punc)")
     parser.add_argument("--tts", action="store_true", help="仅下载 TTS 语音合成与声音克隆模型 (VoxCPM2)")
     parser.add_argument("--vision", action="store_true", help="仅下载目标检测模型 (YOLO11s)")
+    parser.add_argument("--rerank", action="store_true", help="仅下载文本重排模型 (bge-reranker-v2-m3)")
     parser.add_argument("--source", choices=["modelscope", "huggingface"], default="modelscope",
                         help="下载源 (国内推荐 modelscope，默认)")
 
     args = parser.parse_args()
 
-    select_specific = args.asr or args.tts or args.vision
+    select_specific = args.asr or args.tts or args.vision or args.rerank
     download_asr = args.asr or not select_specific
     download_tts = args.tts or not select_specific
     download_vision = args.vision or not select_specific
+    download_rerank = args.rerank or not select_specific
 
     print("=" * 65)
     print("🤖 NanoSense 模型下载管理器")
@@ -148,12 +158,14 @@ def main():
 
     if download_asr:
         download_repo("asr", source=args.source)
-        # 如果需要完全离线运行，也可以预下载 VAD 和 PUNC
         download_repo("vad", source=args.source)
         download_repo("punc", source=args.source)
 
     if download_tts:
         download_repo("tts", source=args.source)
+
+    if download_rerank:
+        download_repo("rerank", source=args.source)
 
     print("\n" + "=" * 65)
     print("🎉 选定模型已全部准备就绪！")
