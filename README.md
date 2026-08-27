@@ -15,7 +15,7 @@
 | 🧬 **声音克隆 (Cloning)** | `POST /v1/audio/clone`<br>*(或 `/v1/audio/speech` 传 Base64)* | **VoxCPM2 复合克隆引擎**<br>• **3~10 秒极速音色复刻**<br>• **克隆+情绪微调**（复刻音色同时叠加语气）<br>• **极清克隆**（配合原台词极致保真） | **Tesla T10** (`cuda:0`) | 专属声音定制、角色声音复刻、个性化配音 |
 | 👁️ **目标检测 (Vision)** | `POST /v1/vision/detection` | **Ultralytics YOLO11s**<br>• 毫秒级快速图像检测<br>• 输出精确边界框 (Bounding Box) 与置信度 | **Tesla T10** (`cuda:0`) | 人体/人脸识别、安防监控、画面内容分析 |
 | 📝 **文本嵌入 (Embeddings)** | `POST /v1/embeddings` | **OpenAI 兼容 Embeddings**<br>• 支持单条/批量文本向量化<br>• 适配知识库召回检索 | 远程网关 | RAG 知识库检索、语义搜索、文本聚类 |
-| 🔀 **文档重排 (Rerank)** | `POST /v1/rerank` | **BAAI bge-reranker-base** (2.78亿参数)<br>• **Cohere/Jina 兼容接口**<br>• 中英文及多语言精准相关度打分<br>• 显存仅占 ~538MB，轻巧极速 | **GTX 1050 Ti** (`cuda:1`) | RAG 知识库精排、精准语义过滤、搜索相关性重排 |
+| 🔀 **文档重排 (Rerank)** | `POST /v1/rerank` | **BAAI bge-reranker-v2-m3** (5.67亿参数，FP16)<br>• **Cohere/Jina 兼容接口**<br>• 支持 8192 tokens 超长上下文、100+ 语言跨语种精排<br>• 显存仅占 ~1.09GB，打分分辨率极高 (`0.98+`) | **GTX 1050 Ti** (`cuda:1`) | RAG 知识库精排、精准语义过滤、搜索相关性重排 |
 
 ---
 
@@ -33,9 +33,9 @@
   │  • Paraformer + VAD + CT-Punc       │                                 │  • 20亿参数，48kHz 采样率           │
   │  • 显存占用: ~2.19 GB               │                                 │  • 显存占用: ~5.2 GB (余量 10.8GB)  │
   │  ─────────────────────────────────  │                                 │  ─────────────────────────────────  │
-  │  🔀 bge-reranker-base 重排 (~538MB) │                                 │  👁️ YOLO11s 视觉检测 (占 ~25MB)    │
-  │  • ASR+Rerank 总显存: ~2.73 GB      │                                 │                                     │
-  │  • 4GB 卡依然剩余 ~1.3 GB 充裕安全  │                                 │                                     │
+  │  🔀 bge-reranker-v2-m3 重排 (~1.09G)│                                 │  👁️ YOLO11s 视觉检测 (占 ~25MB)    │
+  │  • ASR+Rerank 总显存: ~3.28 GB      │                                 │                                     │
+  │  • 4GB 卡依然保留 ~0.7 GB 安全余量  │                                 │                                     │
   └─────────────────────────────────────┘                                 └─────────────────────────────────────┘
 ```
 
@@ -57,7 +57,7 @@
 | 🎙️ **ASR 切片** | **FSMN-VAD** (语音切分) | [ModelScope iic/speech_fsmn_vad_zh-cn-16k-common-pytorch](https://www.modelscope.cn/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch) | 自动缓存或 `data/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch` | ~3.9 MB | 自动过滤静音，实现长音频智能分段 |
 | 🎙️ **ASR 标点** | **CT-Transformer Punc** (标点断句) | [ModelScope iic/punc_ct-transformer_cn-en-common-vocab471067-large](https://www.modelscope.cn/models/iic/punc_ct-transformer_cn-en-common-vocab471067-large) | 自动缓存或 `data/iic/punc_ct-transformer_cn-en-common-vocab471067-large` | ~1.2 GB | 中英文智能标点恢复与断句排版 |
 | 🔊 **TTS 合成/克隆** | **OpenBMB VoxCPM2** (2B) | **ModelScope**: [openbmb/VoxCPM2](https://www.modelscope.cn/models/openbmb/VoxCPM2)<br>**HuggingFace**: [openbmb/VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | `data/openbmb/VoxCPM2` | ~4.7 GB | 48kHz 录音室采样率、支持音色设计与参考音频克隆 |
-| 🔀 **文档重排 (Rerank)** | **BAAI bge-reranker-base** | **ModelScope**: [BAAI/bge-reranker-base](https://www.modelscope.cn/models/BAAI/bge-reranker-base)<br>**HuggingFace**: [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base) | `data/BAAI/bge-reranker-base` | ~550 MB | 仅需 ~538MB 显存，极适合与 ASR 一同部署在 1050 Ti 上 |
+| 🔀 **文档重排 (Rerank)** | **BAAI bge-reranker-v2-m3** | **ModelScope**: [BAAI/bge-reranker-v2-m3](https://www.modelscope.cn/models/BAAI/bge-reranker-v2-m3)<br>**HuggingFace**: [BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) | `data/BAAI/bge-reranker-v2-m3` | ~1.1 GB (FP16) | 100+ 语言多模态 Cross-Encoder 语义精排模型（支持 8K 长文本） |
 | 👁️ **目标检测** | **Ultralytics YOLO11s** (默认) | [GitHub Releases v8.3.0/yolo11s.pt](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt) | `data/yolo11s.pt` | ~19 MB | COCO 80 类别检测 (47.0% mAP) |
 | 👁️ **目标检测 (备选)** | **Ultralytics YOLO11n** (超轻量) | [GitHub Releases v8.3.0/yolo11n.pt](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt) | `data/yolo11n.pt` | ~5.4 MB | 极致轻量版 (39.5% mAP) |
 
@@ -334,9 +334,22 @@ curl http://localhost:5015/v1/rerank \
 
 ---
 
-### 4. 文本重排 (Rerank) 选型 —— 选定 `BAAI/bge-reranker-base`（2026-08）
-* 选定 **`BAAI/bge-reranker-base`**（2.78 亿参数，磁盘仅占 **550 MB**，显存占 **~538 MB**）。
-* **选定理由**：
-  1. 权重小（仅 550MB）、显存占用极低（~538MB），与 ASR（2.19GB）合并跑在 **GTX 1050 Ti (4GB)** 上总显存仅 **~2.73 GB**，依然富余 1.3 GB 显存。
-  2. 单次批量打分仅需 5~15 毫秒，响应极快，非常适合中台 RAG 快速重排需求。
-  3. 接口对齐 Cohere / Jina 标准规范，支持纯文本与结构化字典输入。
+### 4. 文本重排 (Rerank) 选型 —— 选定 `BAAI/bge-reranker-v2-m3`（2026-08）
+
+**实测候选对比数据（GTX 1050 Ti 硬件实测）：**
+
+| 候选模型与量化规格 | 权重体积 | GPU 显存占用 | 单次推理延迟 (P50) | 打分区分度 (命中/未命中) | 评测结论 |
+|---|---|---|---|---|---|
+| ✅ **`bge-reranker-v2-m3` (原生 FP16)** | **1.10 GB** | **1,092 MiB (~1.07 GB)** | **76.2 ms** | **`0.9800` / `0.00010`** | 🏆 **最优选（精度最高、支持 8K 长文本、分辨率极高）** |
+| ❌ `bge-reranker-v2-m3` (4-bit NF4) | 418 MB | 1,159 MiB (~1.13 GB) | 78.3 ms | `0.9625` / `0.00014` | 否决：Pascal 架构下需额外开辟反量化缓冲区，显存不降反升 |
+| ❌ `bge-reranker-v2-m3` (8-bit INT8) | 606 MB | 1,308 MiB (~1.28 GB) | 205.4 ms | `0.9799` / `0.00008` | 否决：缺乏 INT8 Tensor Core，算力惩罚导致延迟飙升 3 倍 |
+| ❌ `bge-reranker-base` (原生 FP16) | 550 MB | 539 MiB (~0.53 GB) | 23.8 ms | `0.3535` / `0.00004` | 否决：打分区分度较内敛，最大长度受限在 512 tokens |
+
+**选定理由与归档说明（2026-08）：**
+1. **为什么选择原生 FP16 而非 4-bit/8-bit 量化**：
+   * 实测证明，对于 5.6 亿参数的 Reranker，4-bit 量化虽缩减了静态文件大小，但 CUDA 计算时需开辟中间显存池，在 GTX 1050 Ti 上运行时显存（1159MB）反而比原生 FP16（1092MB）更多；且 8-bit 量化因缺乏硬件 INT8 单元导致延迟飙升 3 倍。
+   * 原生 FP16 在 1050 Ti 上显存仅占 **~1.07 GB**，与 ASR 全栈（2.19GB）合并加载后总显存为 **~3.28 GB / 4.0 GB**，依然保留 **~0.7 GB 安全余量**，完全不会 OOM。
+2. **已清理的冗余权重（2026-08）**：
+   * 删除 `data/BAAI/bge-reranker-base`（552 MB）
+   * 删除 `data/BAAI/bge-reranker-v2-m3-GGUF`（1.1 GB）
+   * 将 `data/BAAI/bge-reranker-v2-m3` 权重无损转存为 FP16，精简至 **1.1 GB**。
