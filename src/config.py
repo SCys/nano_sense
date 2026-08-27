@@ -175,12 +175,12 @@ class Config:
         """获取 Rerank 重排模型配置（支持环境变量）"""
         model_path = self._get_env_or_config(
             "rerank", "model_path", "RERANK_MODEL_PATH",
-            fallback="./data/BAAI/bge-reranker-v2-m3",
+            fallback="./data/BAAI/bge-reranker-base",
         )
         timeout_seconds = self.getint("rerank", "timeout_seconds", fallback=1800)
         device = self._get_env_or_config(
             "rerank", "device", "RERANK_DEVICE",
-            fallback="cuda:0",
+            fallback="cuda:1",
         )
 
         if not os.path.exists(model_path):

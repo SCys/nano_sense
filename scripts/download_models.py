@@ -50,12 +50,12 @@ MODELS = {
         "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt",
     },
     "rerank": {
-        "name": "BAAI bge-reranker-v2-m3 (文本重排)",
-        "target_dir": os.path.join(DATA_DIR, "BAAI", "bge-reranker-v2-m3"),
-        "modelscope_id": "BAAI/bge-reranker-v2-m3",
-        "huggingface_id": "BAAI/bge-reranker-v2-m3",
-        "git_url_ms": "https://www.modelscope.cn/BAAI/bge-reranker-v2-m3.git",
-        "git_url_hf": "https://huggingface.co/BAAI/bge-reranker-v2-m3",
+        "name": "BAAI bge-reranker-base (文本重排，~550MB)",
+        "target_dir": os.path.join(DATA_DIR, "BAAI", "bge-reranker-base"),
+        "modelscope_id": "BAAI/bge-reranker-base",
+        "huggingface_id": "BAAI/bge-reranker-base",
+        "git_url_ms": "https://www.modelscope.cn/BAAI/bge-reranker-base.git",
+        "git_url_hf": "https://huggingface.co/BAAI/bge-reranker-base",
     },
 }
 
